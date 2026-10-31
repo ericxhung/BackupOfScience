@@ -6,11 +6,7 @@ from flask import Flask, render_template, jsonify
 import openpyxl
 import pandas as pd
 
-app = Flask(
-    __name__,
-    template_folder="../templates",
-    static_folder="../static",
-)
+app = Flask(__name__)
 
 
 def parse_date_from_string(text):
@@ -26,9 +22,14 @@ def parse_date_from_string(text):
 
 
 def load_experiment_data():
-  # 尋找專案根目錄下的 電阻 資料夾
-  base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-  folder_path = os.path.join(base_dir, "電阻")
+  # 1. 取得目前程式碼所在的資料夾 (例如：app/)
+  current_dir = os.path.dirname(os.path.abspath(__file__))
+
+  # 2. 取得上一層父資料夾 (例如：科資/)，也就是「電阻」所在的目錄
+  parent_dir = os.path.dirname(current_dir)
+
+  # 3. 組合出「電阻」資料夾的完整路徑
+  folder_path = os.path.join(parent_dir, "電阻")
 
   file_list = []
   if os.path.exists(folder_path):
