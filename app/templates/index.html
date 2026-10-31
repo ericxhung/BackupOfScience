@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>科展實驗數據雲端儀表板</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body class="bg-gray-100 text-gray-800 font-sans">
+    <div class="container mx-auto px-4 py-8 max-w-7xl">
+        <!-- 標題 -->
+        <header class="mb-8 text-center">
+            <h1 class="text-3xl font-extrabold text-blue-600">📊 幾丁聚醣水污染修復 - 實驗數據管理系統</h1>
+            <p class="text-gray-500 mt-2">雲端即時運算、趨勢圖表與多格式匯出儀表板</p>
+        </header>
+
+        <!-- 控制列：模式切換與匯出 -->
+        <div class="bg-white p-6 rounded-xl shadow-md mb-8 flex flex-wrap justify-between items-center gap-4">
+            <div class="flex items-center gap-3">
+                <span class="font-semibold text-gray-700">搜尋模式：</span>
+                <a href="/?mode=RESISTOR"
+                    class="px-4 py-2 rounded-lg text-sm font-medium transition {% if mode == 'RESISTOR' %}bg-blue-600 text-white{% else %}bg-gray-200 text-gray-700 hover:bg-gray-300{% endif %}">電阻模式
+                    (=[數字]*...)</a>
+                <a href="/?mode=AVERAGE"
+                    class="px-4 py-2 rounded-lg text-sm font-medium transition {% if mode == 'AVERAGE' %}bg-blue-600 text-white{% else %}bg-gray-200 text-gray-700 hover:bg-gray-300{% endif %}">平均值模式
+                    (=AVERAGE)</a>
+            </div>
+
+            <div class="flex items-center gap-3">
+                <span class="font-semibold text-gray-700">匯出檔案：</span>
+                <a href="/export/xlsx?mode={{ mode }}"
+                    class="px-3 py-2 bg-green-600 text-white rounded-lg text-sm font-medium hover:bg-green-700 transition">📥
+                    匯出 Excel</a>
+                <a href="/export/csv?mode={{ mode }}"
+                    class="px-3 py-2 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700 transition">📥
+                    匯出 CSV</a>
+                <a href="/export/md?mode={{ mode }}"
+                    class="px-3 py-2 bg-purple-600 text-white rounded-lg text-sm font-medium hover:bg-purple-700 transition">📥
+                    匯出 Markdown</a>
+            </div>
+        </div>
+
+        <!-- 📈 互動圖表區 (含項目勾選控制) -->
+        <div class="bg-white p-6 rounded-xl shadow-md mb-8">
+            <div class="flex flex-wrap justify-between items-center mb-4">
+                <h3 class="text-xl font-bold text-gray-700">📈 實驗數據趨勢折線圖</h3>
+                <div class="space-x-2">
+                    <button onclick="toggleAllDatasets(true)"
+                        class="text-xs bg-gray-200 px-3 py-1 rounded hover:bg-gray-300">全選</button>
+                    <button onclick="toggleAllDatasets(false)"
+                        class="text-xs bg-gray-200 px-3 py-1 rounded hover:bg-gray-300">全不選</button>
+                </div>
+            </div>
+
+            <!-- 動態項目勾選面板 -->
+            <div id="itemCheckboxContainer"
+                class="flex flex-wrap gap-3 mb-6 p-4 bg-gray-50 rounded-lg border border-gray-200 text-sm">
+                <!-- JavaScript 動態生成項目勾選框 -->
+            </div>
+
+            <div class="relative h-96">
+                <canvas id="experimentChart"></canvas>
+            </div>
+        </div>
+
+        <!-- 📋 數據表格區 -->
+        <div class="bg-white p-6 rounded-xl shadow-md overflow-x-auto">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold text-gray-700">📋 完整矩陣對照表</h3>
+                <div class="text-sm text-gray-500">共載入 {{ dates|length }} 天實驗數據，{{ items|length }} 個項目</div>
+            </div>
+            <div class="overflow-x-auto">
+                {{ tables | safe }}
+            </div>
+        </div>
+    </div>
+
+    <!-- 圖表渲染與互動邏輯 -->
+    <script>
+        const rawChartData = {{ chart_json | tojson | safe0 }};
+        let myChart = null;
+
+        if (rawChartData && rawChartData.datasets) {
+            const container = document.getElementById('itemCheckboxContainer');
+
+            // 1. 動態生成每個項目的勾選框
+            rawChartData.datasets.forEach((dataset, index) => {
+                const label = dataset.label;
+                const color = dataset.borderColor;
+
+                const wrapper = document.createElement('label');
+                wrapper.className = 'flex items-center space-x-2 cursor-pointer bg-white px-3 py-1.5 rounded border border-gray-200 shadow-sm';
+
+                const checkbox = document.createElement('input');
+                checkbox.type = 'checkbox';
+                checkbox.checked = true; // 預設全選
+                checkbox.value = index;
+                checkbox.className = 'rounded text-blue-600 focus:ring-blue-500';
+                checkbox.onchange = updateChart;
+
+                const colorDot = document.createElement('span');
+                colorDot.className = 'w-3 h-3 rounded-full';
+                colorDot.style.backgroundColor = color;
+
+                const text = document.createElement('span');
+                text.innerText = label;
+                text.className = 'font-medium text-gray-700';
+
+                wrapper.appendChild(checkbox);
+                wrapper.appendChild(colorDot);
+                wrapper.appendChild(text);
+                container.appendChild(wrapper);
+            });
+
+            // 2. 初始化 Chart.js 圖表
+            const ctx = document.getElementById('experimentChart').getContext('2d');
+            myChart = new Chart(ctx, {
+                type: 'line',
+                data: rawChartData,
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: { grid: { color: '#f3f4f6' } },
+                        x: { grid: { display: false } }
+                    },
+                    plugins: {
+                        legend: { display: false } // 使用我們自訂的勾選面板，隱藏預設圖例
+                    }
+                }
+            });
+        }
+
+        // 3. 勾選框變更時更新圖表顯示
+        function updateChart() {
+            const checkboxes = document.querySelectorAll('#itemCheckboxContainer input[type="checkbox"]');
+            checkboxes.forEach(cb => {
+                const datasetIndex = parseInt(cb.value);
+                const meta = myChart.getDatasetMeta(datasetIndex);
+                meta.hidden = !cb.checked;
+            });
+            myChart.update();
+        }
+
+        // 4. 全選 / 全不選功能
+        function toggleAllDatasets(selectState) {
+            const checkboxes = document.querySelectorAll('#itemCheckboxContainer input[type="checkbox"]');
+            checkboxes.forEach(cb => {
+                cb.checked = selectState;
+            });
+            updateChart();
+        }
+    </script>
+</body>
+
+</html>
