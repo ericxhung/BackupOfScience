@@ -164,11 +164,27 @@
                 responsive: true,
                 maintainAspectRatio: false,
                 scales: {
-                    x: { title: { display: true, text: '日期' } },
+                    x: {
+                        title: { display: true, text: '日期' },
+                        grid: { color: '#f3f4f6' }
+                    },
                     y: {
                         min: yMin,
                         max: yMax,
-                        ticks: { stepSize: stepSize }
+                        ticks: {
+                            stepSize: stepSize // 主要格線間距
+                        },
+                        grid: {
+                            color: '#e5e7eb',       // 主要格線顏色
+                            minor: {
+                                display: true,      // 顯示次要格線
+                                color: '#f9fafb'    // 次要格線顏色（更淡）
+                            }
+                        },
+                        minor: {
+                            stepSize: stepSize / 2, // 次要格線為主要的一半
+                            display: false          // ❌ 次要格線不顯示刻度數字
+                        }
                     }
                 }
             }
