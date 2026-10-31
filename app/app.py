@@ -1,20 +1,28 @@
-from datetime import datetime
 import io
 import json
 import os
 import re
 import string
-from flask import Flask, make_response, render_template, request, send_file
+from datetime import datetime
+from flask import (
+    Flask,
+    abort,
+    jsonify,
+    make_response,
+    render_template,
+    request,
+    send_file,
+)
+import markdown
 import openpyxl
 import pandas as pd
 
-app = Flask(__name__)
-
-# 自動計算上一層目錄作為根目錄
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
-PARENT_DIR = os.path.dirname(CURRENT_DIR)
-FOLDER_PATH = os.path.join(PARENT_DIR, "電阻")
-SETTING_FILE_PATH = os.path.join(PARENT_DIR, "setting.json")
+TEMPLATE_DIR = os.path.join(CURRENT_DIR, "templates")
+ROOT_DIR = os.path.dirname(CURRENT_DIR)  # C:\Users\USER\Documents\科資
+RESISTOR_DIR = os.path.join(ROOT_DIR, "電阻")
+
+app = Flask(__name__, template_folder=TEMPLATE_DIR)
 
 
 def parse_date_from_string(text):
@@ -29,143 +37,117 @@ def parse_date_from_string(text):
   return None
 
 
-def load_item_mapping(all_sheets):
-  # 載入 setting.json，若無則預設排序
-  if os.path.exists(SETTING_FILE_PATH):
-    try:
-      with open(SETTING_FILE_PATH, "r", encoding="utf-8") as sf:
-        mapping = json.load(sf)
-        if isinstance(mapping, dict) and len(mapping) > 0:
-          return mapping
-    except Exception:
-      pass
-  return {sname: [sname] for sname in sorted(list(all_sheets))}
-
-
-def process_experiment_data(mode="RESISTOR"):
+def get_all_resistor_data(mode="RESISTOR"):
   file_list = []
-  if os.path.exists(FOLDER_PATH):
-    for root, dirs, files in os.walk(FOLDER_PATH):
+  if os.path.exists(RESISTOR_DIR):
+    for root, dirs, files in os.walk(RESISTOR_DIR):
       for file in files:
         if file.lower().endswith((".xlsx", ".xls", ".xlsm")):
           f_path = os.path.join(root, file)
           folder_name = os.path.basename(root)
-
-          date_str = parse_date_from_string(file)
-          if not date_str:
-            date_str = parse_date_from_string(folder_name)
+          date_str = parse_date_from_string(file) or parse_date_from_string(
+              folder_name
+          )
           if not date_str:
             date_str = "2026-01-01"
-
           file_list.append({"path": f_path, "filename": file, "date": date_str})
 
   if not file_list:
-    return pd.DataFrame(), {}
+    return pd.DataFrame()
 
-  all_sheets = set()
-  for f in file_list:
+  setting_path = os.path.join(ROOT_DIR, "setting.json")
+  item_mapping = {}
+  if os.path.exists(setting_path):
     try:
-      wb = openpyxl.load_workbook(f["path"], read_only=True, data_only=True)
-      for sname in wb.sheetnames:
-        if (
-            sname not in ["氣溫", "溫度"]
-            and "plxdaq" not in sname.lower()
-        ):
-          all_sheets.add(sname)
-      wb.close()
+      with open(setting_path, "r", encoding="utf-8") as sf:
+        item_mapping = json.load(sf)
     except Exception:
       pass
 
-  item_mapping = load_item_mapping(all_sheets)
+  if not item_mapping:
+    all_sheets = set()
+    for f in file_list:
+      try:
+        wb = openpyxl.load_workbook(f["path"], read_only=True, data_only=True)
+        for sname in wb.sheetnames:
+          if (
+              sname not in ["氣溫", "溫度"]
+              and "plxdaq" not in sname.lower()
+          ):
+            all_sheets.add(sname)
+        wb.close()
+      except Exception:
+        pass
+    item_mapping = {sname: [sname] for sname in sorted(list(all_sheets))}
+
   matrix_data = {}
   cols = list(string.ascii_uppercase[:16])
   rows = range(1, 31)
-
-  if mode == "RESISTOR":
-    pattern = re.compile(r"^=\d+\*")
-  else:
-    pattern = re.compile(r"^=AVERAGE\(", re.IGNORECASE)
+  pattern = (
+      re.compile(r"^=\d+\*")
+      if mode == "RESISTOR"
+      else re.compile(r"^=AVERAGE\(", re.IGNORECASE)
+  )
 
   for f in file_list:
-    f_path = f["path"]
-    dt_obj = datetime.strptime(f["date"], "%Y-%m-%d")
-    date_col_name = dt_obj.strftime("%Y/%m/%d")
-
-    if date_col_name not in matrix_data:
-      matrix_data[date_col_name] = {}
+    date_key = f["date"]
+    if date_key not in matrix_data:
+      matrix_data[date_key] = {}
 
     try:
-      wb_formula = openpyxl.load_workbook(f_path, data_only=False)
-      wb_data = openpyxl.load_workbook(f_path, data_only=True)
+      wb_f = openpyxl.load_workbook(f["path"], data_only=False)
+      wb_d = openpyxl.load_workbook(f["path"], data_only=True)
 
-      for final_item_name, raw_sheets in item_mapping.items():
-        found_val = ""
+      for item_name, raw_sheets in item_mapping.items():
+        val_found = None
         for sname in raw_sheets:
-          if sname in wb_formula.sheetnames and sname in wb_data.sheetnames:
-            sheet_f = wb_formula[sname]
-            sheet_d = wb_data[sname]
-
-            found_coord = None
-            for col in cols:
-              for row in rows:
-                cell_ref = f"{col}{row}"
-                val = sheet_f[cell_ref].value
-                if val is not None and isinstance(val, str):
-                  if pattern.match(val):
-                    found_coord = cell_ref
-                    break
-              if found_coord:
+          if sname in wb_f.sheetnames and sname in wb_d.sheetnames:
+            sf, sd = wb_f[sname], wb_d[sname]
+            coord = None
+            for c in cols:
+              for r in rows:
+                cell_ref = f"{c}{r}"
+                v = sf[cell_ref].value
+                if v and isinstance(v, str) and pattern.match(v):
+                  coord = cell_ref
+                  break
+              if coord:
                 break
 
-            if found_coord:
-              cell_val = sheet_d[found_coord].value
-              if cell_val is not None:
-                try:
-                  found_val = float(cell_val)
-                  break  # 找到第一筆就採用
-                except ValueError:
-                  pass
+            if coord and sd[coord].value is not None:
+              try:
+                val_found = float(sd[coord].value)
+                break
+              except ValueError:
+                pass
+        matrix_data[date_key][item_name] = (
+            val_found if val_found is not None else ""
+        )
 
-        matrix_data[date_col_name][final_item_name] = found_val
-
-      wb_formula.close()
-      wb_data.close()
-    except Exception as e:
-      print(f"處理檔案失敗 {f['filename']}: {e}")
+      wb_f.close()
+      wb_d.close()
+    except Exception:
+      pass
 
   df = pd.DataFrame(matrix_data)
-  final_index_order = list(item_mapping.keys())
-  for sname in final_index_order:
-    if sname not in df.index:
-      df.loc[sname] = ""
-
-  df = df.reindex(index=final_index_order)
+  final_order = list(item_mapping.keys())
+  for s in final_order:
+    if s not in df.index:
+      df.loc[s] = ""
+  df = df.reindex(index=final_order)
   df = df.reindex(sorted(df.columns), axis=1)
-  df.index.name = "項目"
-  df = df.reset_index()
+  return df
 
-  return df, item_mapping
+
+# ------------------- 路由 -------------------
 
 
 @app.route("/")
 def index():
-  mode = request.args.get("mode", "RESISTOR")
-  df, _ = process_experiment_data(mode)
+  df = get_all_resistor_data()
+  dates = list(df.columns) if not df.empty else []
+  items = list(df.index) if not df.empty else []
 
-  if df.empty:
-    return render_template(
-        "index.html",
-        tables="<p class='text-red-500'>找不到有效的 Excel 檔案或資料。</p>",
-        dates=[],
-        items=[],
-        chart_json={},
-        mode=mode,
-    )
-
-  dates = [col for col in df.columns if col != "項目"]
-  items = df["項目"].tolist()
-
-  # 準備前端 Chart.js 所需的資料結構
   chart_datasets = []
   colors = [
       "#3b82f6",
@@ -179,97 +161,192 @@ def index():
   ]
 
   for idx, item in enumerate(items):
-    row_data = df[df["項目"] == item].iloc[0]
-    values = [
-        row_data[d] if pd.notna(row_data[d]) and row_data[d] != "" else None
+    row_vals = [
+        df.loc[item, d] if pd.notna(df.loc[item, d]) and df.loc[item, d] != "" else None
         for d in dates
     ]
     chart_datasets.append({
         "label": item,
-        "data": values,
+        "data": row_vals,
         "borderColor": colors[idx % len(colors)],
         "backgroundColor": colors[idx % len(colors)],
         "fill": False,
-        "tension": 0.1,
     })
 
-  chart_json = {"labels": dates, "datasets": chart_datasets}
-
-  # 產生 HTML 表格
-  html_table = df.to_html(
-      classes=(
-          "table-auto w-full border-collapse border border-gray-200 text-center"
-          " text-sm"
-      ),
-      index=False,
-      na_rep="-",
+  summary_chart = {"labels": dates, "datasets": chart_datasets}
+  return render_template(
+      "index.html", dates=dates, items=items, summary_chart=summary_chart
   )
+
+
+@app.route("/chart")
+def chart_page():
+  df = get_all_resistor_data()
+  dates = list(df.columns) if not df.empty else []
+  items = list(df.index) if not df.empty else []
+
+  selected_query = request.args.get("items", "")
+  default_selected = (
+      [i.strip() for i in selected_query.split(",") if i.strip()]
+      if selected_query
+      else []
+  )
+
+  item_data_map = {}
+  for item in items:
+    points = []
+    for d in dates:
+      v = df.loc[item, d]
+      if pd.notna(v) and v != "":
+        points.append({"date": d, "value": float(v)})
+    item_data_map[item] = points
 
   return render_template(
-      "index.html",
-      tables=html_table,
-      dates=dates,
+      "chart.html",
       items=items,
-      chart_json=chart_json,
-      mode=mode,
+      dates=dates,
+      default_selected=json.dumps(default_selected, ensure_ascii=False),
+      item_data_map=json.dumps(item_data_map, ensure_ascii=False),
   )
 
 
-# 匯出路由 (支援 Excel, CSV, Markdown)
-@app.route("/export/<file_type>")
-def export_file(file_type):
-  mode = request.args.get("mode", "RESISTOR")
-  df, _ = process_experiment_data(mode)
+@app.route("/files")
+def files_page():
+  rel_path = request.args.get("path", "")
+  target_dir = os.path.normpath(os.path.join(ROOT_DIR, rel_path))
+  if not target_dir.startswith(ROOT_DIR):
+    target_dir = ROOT_DIR
+    rel_path = ""
 
-  if df.empty:
-    return "無數據可匯出", 400
+  if os.path.isfile(target_dir):
+    filename = os.path.basename(target_dir)
+    ext = os.path.splitext(filename)[1].lower()
+    content_type = "unknown"
+    preview_data = ""
 
-  if file_type == "csv":
-    output = io.BytesIO()
-    output.write(df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig"))
-    output.seek(0)
-    return send_file(
-        output,
-        mimetype="text/csv",
-        as_attachment=True,
-        download_name="experiment_data.csv",
+    try:
+      if ext in [".txt", ".bat"]:
+        content_type = "text"
+        with open(target_dir, "r", encoding="utf-8", errors="ignore") as f:
+          preview_data = f.read()
+
+      elif ext == ".py":
+        content_type = "code"
+        with open(target_dir, "r", encoding="utf-8", errors="ignore") as f:
+          preview_data = f.read()
+
+      elif ext == ".json":
+        content_type = "json"
+        with open(target_dir, "r", encoding="utf-8", errors="ignore") as f:
+          preview_data = f.read()
+
+      elif ext == ".md":
+        content_type = "markdown"
+        with open(target_dir, "r", encoding="utf-8", errors="ignore") as f:
+          raw_md = f.read()
+          preview_data = {
+              "raw": raw_md,
+              "html": markdown.markdown(
+                  raw_md, extensions=["tables", "fenced_code"]
+              ),
+          }
+
+      elif ext in [".jpg", ".png", ".jpeg"]:
+        content_type = "image"
+        preview_data = f"/raw_file?path={rel_path}"
+
+      elif ext in [".xlsx", ".xlsm"]:
+        content_type = "excel"
+        xls = pd.ExcelFile(target_dir)
+        sheets_html = {}
+        for sname in xls.sheet_names[:5]:
+          df_s = pd.read_excel(xls, sheet_name=sname).head(50)
+          sheets_html[sname] = df_s.to_html(
+              classes=(
+                  "table-auto w-full border-collapse border border-gray-300"
+                  " text-xs text-center"
+              ),
+              index=False,
+          )
+        preview_data = sheets_html
+
+      elif ext in [".doc", ".docx"]:
+        content_type = "docx_preview"
+        preview_data = f"/raw_file?path={rel_path}"
+
+      elif ext == ".html":
+        content_type = "html"
+        preview_data = f"/raw_file?path={rel_path}"
+
+      else:
+        content_type = "unsupported"
+
+    except Exception as e:
+      content_type = "error"
+      preview_data = str(e)
+
+    parent_rel = os.path.dirname(rel_path)
+    return render_template(
+        "files.html",
+        mode="file",
+        rel_path=rel_path,
+        parent_rel=parent_rel,
+        filename=filename,
+        ext=ext,
+        content_type=content_type,
+        preview_data=preview_data,
     )
 
-  elif file_type == "md":
-    headers = list(df.columns)
-    header_str = " | ".join(str(h) for h in headers)
-    sep_str = " | ".join("---" for _ in headers)
-    md_lines = [f"| {header_str} |", f"| {sep_str} |"]
-    for _, row in df.iterrows():
-      row_str = " | ".join(
-          str(val) if pd.notna(val) and val != "" else "" for val in row
-      )
-      md_lines.append(f"| {row_str} |")
+  else:
+    items = []
+    try:
+      for name in os.listdir(target_dir):
+        full_p = os.path.join(target_dir, name)
+        is_dir = os.path.isdir(full_p)
+        child_rel = os.path.join(rel_path, name).replace("\\", "/")
+        items.append({"name": name, "is_dir": is_dir, "rel_path": child_rel})
+    except Exception:
+      pass
 
-    output = io.BytesIO()
-    output.write("\n".join(md_lines).encode("utf-8"))
-    output.seek(0)
-    return send_file(
-        output,
-        mimetype="text/markdown",
-        as_attachment=True,
-        download_name="experiment_data.md",
+    items.sort(key=lambda x: (not x["is_dir"], x["name"].lower()))
+    parent_rel = (
+        os.path.dirname(rel_path).replace("\\", "/") if rel_path else None
     )
 
-  else:  #預設 xlsx
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-      df.to_excel(writer, index=False, sheet_name="數據整理")
-    output.seek(0)
-    return send_file(
-        output,
-        mimetype=(
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        ),
-        as_attachment=True,
-        download_name="experiment_data.xlsx",
+    return render_template(
+        "files.html",
+        mode="dir",
+        rel_path=rel_path,
+        parent_rel=parent_rel,
+        items=items,
     )
+
+
+@app.route("/raw_file")
+def raw_file():
+  rel_path = request.args.get("path", "")
+  target_file = os.path.normpath(os.path.join(ROOT_DIR, rel_path))
+  if not target_file.startswith(ROOT_DIR) or not os.path.isfile(target_file):
+    return abort(404)
+  return send_file(target_file)
+
+
+@app.route("/download")
+def download_page():
+  resources = [
+      {
+          "name": "算電阻.py",
+          "path": "算電阻.py",
+          "desc": "本機自動批次為 Excel 工作表插入 I2/I3 公式之 Python 腳本。",
+      },
+      {
+          "name": "整理.py",
+          "path": "整理.py",
+          "desc": "包含 Tkinter GUI 之完整 Excel 數據整理與矩陣匯出工具。",
+      },
+  ]
+  return render_template("download.html", resources=resources)
 
 
 if __name__ == "__main__":
-  app.run(debug=True, port=5000)
+  app.run(debug=True, host="0.0.0.0", port=5000)

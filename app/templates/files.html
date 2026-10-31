@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% block title %}檔案查看 - 科展儀表板{% endblock %}
+
+{% block content %}
+<!-- 引入 docx-preview 所需的 JSZip 與渲染庫 -->
+<script src="https://cdn.jsdelivr.net/npm/jszip/dist/jszip.min.js"></script>
+<script src="https://unpkg.com/docx-preview/dist/docx-preview.min.js"></script>
+
+<div class="bg-white rounded-xl shadow-md p-6 h-[780px] flex flex-col">
+    <!-- 上方麵包屑路徑與下載 -->
+    <div class="flex justify-between items-center mb-4 border-b pb-3">
+        <div class="flex items-center gap-2 text-sm text-gray-600">
+            <a href="/files" class="font-bold text-blue-600 hover:underline">📂 根目錄</a>
+            {% if rel_path %}
+            <span>/</span>
+            <span class="font-semibold text-gray-800">{{ rel_path }}</span>
+            {% endif %}
+        </div>
+
+        {% if mode == 'file' %}
+        <a href="/raw_file?path={{ rel_path }}" download
+            class="px-4 py-1.5 bg-green-600 text-white rounded text-sm font-medium hover:bg-green-700">📥 下載檔案</a>
+        {% endif %}
+    </div>
+
+    <!-- 下方主區域：左邊檔案樹，右邊預覽區 -->
+    <div class="flex flex-grow gap-4 overflow-hidden">
+        <!-- 檔案列表模式 -->
+        {% if mode == 'dir' %}
+        <div class="w-full overflow-y-auto">
+            <table class="w-full text-left text-sm">
+                <thead class="bg-gray-50 border-b">
+                    <tr>
+                        <th class="p-2">名稱</th>
+                        <th class="p-2">類型</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% if parent_rel is not none %}
+                    <tr class="border-b hover:bg-gray-50">
+                        <td class="p-2" colspan="2">
+                            <a href="/files?path={{ parent_rel }}" class="text-blue-600 font-medium">⬆️ [返回上一層]</a>
+                        </td>
+                    </tr>
+                    {% endif %}
+                    {% for item in items %}
+                    <tr class="border-b hover:bg-gray-50">
+                        <td class="p-2">
+                            <a href="/files?path={{ item.rel_path }}" class="flex items-center gap-2">
+                                {% if item.is_dir %}📁 <span class="font-semibold text-blue-700">{{ item.name
+                                    }}</span>{% else %}📄 {{ item.name }}{% endif %}
+                            </a>
+                        </td>
+                        <td class="p-2 text-gray-400 text-xs">
+                            {% if item.is_dir %}資料夾{% else %}檔案{% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <!-- 單一檔案預覽區 -->
+        <div class="w-full h-full overflow-auto bg-gray-50 p-4 rounded border flex flex-col">
+            {% if content_type == 'text' %}
+            <pre class="whitespace-pre-wrap text-sm font-mono">{{ preview_data }}</pre>
+
+            {% elif content_type == 'code' %}
+            <pre><code class="language-python">{{ preview_data }}</code></pre>
+
+            {% elif content_type == 'json' %}
+            <pre><code class="language-json">{{ preview_data }}</code></pre>
+
+            {% elif content_type == 'markdown' %}
+            <div class="mb-3">
+                <button onclick="toggleMD()" class="text-xs bg-gray-200 px-2 py-1 rounded">切換 Markdown / 純文字</button>
+            </div>
+            <div id="mdRendered" class="prose max-w-none text-sm">{{ preview_data.html | safe }}</div>
+            <pre id="mdRaw" class="hidden whitespace-pre-wrap text-sm font-mono">{{ preview_data.raw }}</pre>
+
+            {% elif content_type == 'image' %}
+            <div class="flex justify-center items-center h-full">
+                <img src="{{ preview_data }}" class="max-h-full max-w-full object-contain rounded shadow">
+            </div>
+
+            {% elif content_type == 'excel' %}
+            <div class="space-y-6">
+                {% for sname, table_html in preview_data.items() %}
+                <div>
+                    <h4 class="font-bold text-gray-700 mb-1">Sheet: {{ sname }}</h4>
+                    {{ table_html | safe }}
+                </div>
+                {% endfor %}
+            </div>
+
+            {% elif content_type == 'docx_preview' %}
+            <!-- 提示橫幅：若發生跑版可直接下載查看 -->
+            <div
+                class="bg-amber-50 border-l-4 border-amber-400 p-3 mb-4 flex justify-between items-center text-sm text-amber-800 shrink-0">
+                <span>💡 <strong>提示：</strong>線上預覽若遇排版跑版，建議點擊右側按鈕下載檔案至本機觀看。</span>
+                <a href="/raw_file?path={{ rel_path }}" download
+                    class="px-3 py-1 bg-amber-600 text-white rounded text-xs font-bold hover:bg-amber-700 shadow">📥
+                    下載原檔檢視</a>
+            </div>
+
+            <!-- docx-preview 前端渲染 Word 容器 -->
+            <div id="docx-container"
+                class="bg-white p-8 rounded shadow flex-grow overflow-auto max-w-4xl mx-auto w-full">
+                <div class="flex justify-center items-center h-48 text-gray-400">
+                    <span>⏳ 正在載入與渲染 Word 文件排版...</span>
+                </div>
+            </div>
+            <script>
+                document.addEventListener("DOMContentLoaded", function () {
+                    const fileUrl = "{{ preview_data }}";
+                    const container = document.getElementById("docx-container");
+
+                    fetch(fileUrl)
+                        .then(response => {
+                            if (!response.ok) throw new Error("無法取得檔案");
+                            return response.arrayBuffer();
+                        })
+                        .then(buffer => {
+                            container.innerHTML = ""; // 清除載入動畫
+                            docx.renderAsync(buffer, container, null, {
+                                inWrapper: true,      // 使用預設樣式包裝
+                                ignoreWidth: false,   // 保留寬度設定
+                                ignoreHeight: false,  // 保留高度設定
+                                experimental: true,   // 啟用實驗性功能以支援更複雜排版
+                            }).then(() => {
+                                console.log("Word 文件渲染成功！");
+                            }).catch(error => {
+                                container.innerHTML = `<p class='text-red-500 font-bold'>渲染 Word 檔案時發生錯誤：${error.message}</p>`;
+                            });
+                        })
+                        .catch(error => {
+                            container.innerHTML = `<p class='text-red-500 font-bold'>載入檔案失敗：${error.message}</p>`;
+                        });
+                });
+            </script>
+
+            {% elif content_type == 'html' %}
+            <iframe src="{{ preview_data }}" class="w-full h-full border-0"></iframe>
+
+            {% else %}
+            <div class="flex flex-col items-center justify-center h-full space-y-4">
+                <p class="text-gray-500 font-medium">⚠️ 尚不支援線上預覽此格式 ({{ ext }})</p>
+                <a href="/raw_file?path={{ rel_path }}" download
+                    class="px-6 py-2 bg-blue-600 text-white rounded-lg font-bold shadow hover:bg-blue-700">📥 直接下載檔案</a>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+    function toggleMD() {
+        const r = document.getElementById('mdRendered');
+        const raw = document.getElementById('mdRaw');
+        r.classList.toggle('hidden');
+        raw.classList.toggle('hidden');
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+{% block title %}圖表繪製 - 科展儀表板{% endblock %}
+
+{% block content %}
+<div class="flex flex-col md:flex-row gap-6">
+    <!-- 左側控制面板 -->
+    <div class="w-full md:w-1/4 bg-white p-4 rounded-xl shadow-md no-print flex flex-col h-[750px]">
+        <h2 class="text-lg font-bold text-gray-700 mb-3">🔍 選擇項目</h2>
+
+        <!-- 搜尋欄 -->
+        <input type="text" id="searchInput" placeholder="搜尋項目名稱..."
+            class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm mb-3 focus:outline-none focus:border-blue-500"
+            oninput="filterItems()">
+
+        <div class="flex gap-2 mb-3">
+            <button onclick="selectAll(true)"
+                class="text-xs bg-gray-200 hover:bg-gray-300 px-2 py-1 rounded w-1/2">全選</button>
+            <button onclick="selectAll(false)"
+                class="text-xs bg-gray-200 hover:bg-gray-300 px-2 py-1 rounded w-1/2">全不選</button>
+        </div>
+
+        <!-- 項目列表 (逐一勾選) -->
+        <div id="itemList" class="flex-grow overflow-y-auto space-y-2 pr-1 border-t pt-2 text-sm">
+            {% for item in items %}
+            <label class="item-row flex items-center space-x-2 p-1.5 rounded hover:bg-gray-50 cursor-pointer">
+                <input type="checkbox" value="{{ item }}" class="item-checkbox rounded text-blue-600"
+                    onchange="renderChart()">
+                <span class="truncate">{{ item }}</span>
+            </label>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- 右側圖表區 -->
+    <div class="w-full md:w-3/4 bg-white p-6 rounded-xl shadow-md flex flex-col justify-between">
+        <div class="flex justify-between items-center mb-4 no-print">
+            <h2 class="text-xl font-bold text-gray-700">📈 實驗數據折線圖</h2>
+            <div class="space-x-2">
+                <button onclick="downloadPNG()"
+                    class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700">🖼️ 儲存圖片
+                    (1920x1080)</button>
+                <button onclick="window.print()"
+                    class="px-3 py-1.5 bg-green-600 text-white rounded text-sm font-medium hover:bg-green-700">🖨️
+                    列印圖表</button>
+            </div>
+        </div>
+
+        <!-- Canvas 圖表容器 -->
+        <div class="relative flex-grow min-h-[550px] print-only-chart">
+            <canvas id="customChart"></canvas>
+        </div>
+    </div>
+</div>
+
+<script>
+    const itemDataMap = {{ item_data_map | safe }};
+    const allDates = {{ dates | tojson }};
+    let chartInstance = null;
+
+    const colors = [
+        '#3b82f6', '#ef4444', '#10b981', '#f59e0b',
+        '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'
+    ];
+
+    function filterItems() {
+        const query = document.getElementById('searchInput').value.toLowerCase();
+        document.querySelectorAll('.item-row').forEach(row => {
+            const text = row.textContent.toLowerCase();
+            row.style.display = text.includes(query) ? 'flex' : 'none';
+        });
+    }
+
+    function selectAll(state) {
+        document.querySelectorAll('.item-checkbox').forEach(cb => {
+            cb.checked = state;
+        });
+        renderChart();
+    }
+
+    // 計算最佳刻度步幅 (10, 5, 2, 1, 0.1 倍數)
+    function calculateNiceStep(range) {
+        if (range <= 0) return 1;
+        const roughStep = range / 6;
+        const exponent = Math.floor(Math.log10(roughStep));
+        const fraction = roughStep / Math.pow(10, exponent);
+
+        let niceFraction;
+        if (fraction < 1.5) niceFraction = 1;
+        else if (fraction < 3) niceFraction = 2;
+        else if (fraction < 7) niceFraction = 5;
+        else niceFraction = 10;
+
+        return niceFraction * Math.pow(10, exponent);
+    }
+
+    function renderChart() {
+        const checkedBoxes = Array.from(document.querySelectorAll('.item-checkbox:checked'));
+        const selectedItems = checkedBoxes.map(cb => cb.value);
+
+        if (selectedItems.length === 0) {
+            if (chartInstance) chartInstance.destroy();
+            return;
+        }
+
+        // 1. 找出橫軸 (日期) 範圍：最開始與最最後
+        let minDateIdx = allDates.length;
+        let maxDateIdx = -1;
+        let globalMinY = Infinity;
+        let globalMaxY = -Infinity;
+
+        selectedItems.forEach(item => {
+            const points = itemDataMap[item] || [];
+            points.forEach(p => {
+                const idx = allDates.indexOf(p.date);
+                if (idx !== -1) {
+                    if (idx < minDateIdx) minDateIdx = idx;
+                    if (idx > maxDateIdx) maxDateIdx = idx;
+                }
+                if (p.value < globalMinY) globalMinY = p.value;
+                if (p.value > globalMaxY) globalMaxY = p.value;
+            });
+        });
+
+        if (minDateIdx > maxDateIdx) {
+            minDateIdx = 0;
+            maxDateIdx = allDates.length - 1;
+        }
+
+        const filteredDates = allDates.slice(minDateIdx, maxDateIdx + 1);
+
+        // 2. 縱軸上限/下限與格線計算
+        if (globalMinY === Infinity) { globalMinY = 0; globalMaxY = 10; }
+        const range = globalMaxY - globalMinY;
+        const stepSize = calculateNiceStep(range);
+        const yMin = Math.floor(globalMinY / stepSize) * stepSize;
+        const yMax = Math.ceil(globalMaxY / stepSize) * stepSize;
+
+        // 3. 建立 Datasets
+        const datasets = selectedItems.map((item, idx) => {
+            const points = itemDataMap[item] || [];
+            const dataVector = filteredDates.map(d => {
+                const pt = points.find(p => p.date === d);
+                return pt ? pt.value : null;
+            });
+
+            return {
+                label: item,
+                data: dataVector,
+                borderColor: colors[idx % colors.length],
+                backgroundColor: colors[idx % colors.length],
+                tension: 0.1,
+                spanGaps: true
+            };
+        });
+
+        // 4. 繪製圖表
+        const ctx = document.getElementById('customChart').getContext('2d');
+        if (chartInstance) chartInstance.destroy();
+
+        chartInstance = new Chart(ctx, {
+            type: 'line',
+            data: { labels: filteredDates, datasets: datasets },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    x: { title: { display: true, text: '日期' } },
+                    y: {
+                        min: yMin,
+                        max: yMax,
+                        ticks: { stepSize: stepSize }
+                    }
+                }
+            }
+        });
+    }
+
+    // 儲存為 1920x1080 圖片
+    function downloadPNG() {
+        if (!chartInstance) return;
+        const offCanvas = document.createElement('canvas');
+        offCanvas.width = 1920;
+        offCanvas.height = 1080;
+        const offCtx = offCanvas.getContext('2d');
+
+        offCtx.fillStyle = '#ffffff';
+        offCtx.fillRect(0, 0, 1920, 1080);
+
+        const tempChart = new Chart(offCtx, {
+            type: 'line',
+            data: chartInstance.data,
+            options: {
+                ...chartInstance.options,
+                animation: false,
+                responsive: false
+            }
+        });
+
+        const link = document.createElement('a');
+        link.download = 'chart_1920x1080.png';
+        link.href = offCanvas.toDataURL('image/png');
+        link.click();
+        tempChart.destroy();
+    }
+</script>
+{% endblock %}
