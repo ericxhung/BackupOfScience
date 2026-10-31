@@ -114,7 +114,7 @@ def load_experiment_data():
 
   df = pd.DataFrame(matrix_data)
   if not df.empty:
-    df = df.reindex(sorted(df.columns), axis=1)  3. 依日期排序欄位
+    df = df.reindex(sorted(df.columns), axis=1)
 
   return df, matrix_data
 
