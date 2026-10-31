@@ -166,7 +166,7 @@
                 scales: {
                     x: {
                         title: { display: true, text: '日期' },
-                        grid: { color: '#f3f4f6' }
+                        grid: { color: '#e5e7eb' }
                     },
                     y: {
                         min: yMin,
@@ -175,10 +175,11 @@
                             stepSize: stepSize // 主要格線間距
                         },
                         grid: {
-                            color: '#e5e7eb',       // 主要格線顏色
+                            color: '#9ca3af',       // ⬅️ 主要格線顏色加深（灰色，更加清晰易見）
+                            lineWidth: 1,           // 格線粗細
                             minor: {
                                 display: true,      // 顯示次要格線
-                                color: '#f9fafb'    // 次要格線顏色（更淡）
+                                color: '#f3f4f6'    // 次要格線保持較淡
                             }
                         },
                         minor: {
