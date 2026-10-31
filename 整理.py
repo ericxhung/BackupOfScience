@@ -14,8 +14,8 @@ class ExcelProcessorApp(tk.Tk):
 
   def __init__(self):
     super().__init__()
-    self.title("Excel 資料處理與列印整合工具 (B欄固定寬度版)")
-    self.geometry("900x700")
+    self.title("Excel 資料處理與列印整合工具 (Markdown匯出支援版)")
+    self.geometry("900x750")
 
     # 數據整理全域變數
     self.file_list = []
@@ -915,13 +915,39 @@ class ExcelProcessorApp(tk.Tk):
         text=(
             f"目前選擇模式：【{mode_text}】\n"
             "已完成所有設定與項目管理。\n"
-            "點擊下方按鈕將開始運算、儲存設定檔並匯出 Excel。"
+            "請選擇下方匯出格式，並點擊按鈕開始運算與匯出。"
         ),
     )
-    txt_info.pack(padx=20, pady=20)
+    txt_info.pack(padx=20, pady=5)
+
+    # 匯出格式選擇選項 (新增 Markdown)
+    format_frame = ttk.LabelFrame(
+        self.container, text="選擇匯出檔案格式", padding=10
+    )
+    format_frame.pack(fill="x", padx=20, pady=10)
+
+    self.export_format_var = tk.StringVar(value="xlsx")
+    ttk.Radiobutton(
+        format_frame,
+        text="Excel 試算表 (*.xlsx)",
+        value="xlsx",
+        variable=self.export_format_var,
+    ).pack(anchor="w", pady=2)
+    ttk.Radiobutton(
+        format_frame,
+        text="CSV 純文字表格 (*.csv)",
+        value="csv",
+        variable=self.export_format_var,
+    ).pack(anchor="w", pady=2)
+    ttk.Radiobutton(
+        format_frame,
+        text="Markdown 表格 (*.md)",
+        value="md",
+        variable=self.export_format_var,
+    ).pack(anchor="w", pady=2)
 
     btn_run = ttk.Button(
-        self.container, text="開始計算並儲存 Excel", command=self.process_and_export
+        self.container, text="開始計算並儲存", command=self.process_and_export
     )
     btn_run.pack(pady=10)
 
@@ -1035,16 +1061,51 @@ class ExcelProcessorApp(tk.Tk):
       df.index.name = "項目"
       df = df.reset_index()
 
-      save_path = filedialog.asksaveasfilename(
-          defaultextension=".xlsx",
-          filetypes=[("Excel 檔案", "*.xlsx")],
-          title="選擇儲存結果位置與檔名",
+      export_format = (
+          self.export_format_var.get()
+          if hasattr(self, "export_format_var")
+          else "xlsx"
       )
 
-      if not save_path:
-        return
+      if export_format == "csv":
+        save_path = filedialog.asksaveasfilename(
+            defaultextension=".csv",
+            filetypes=[("CSV 檔案", "*.csv")],
+            title="選擇儲存 CSV 檔案位置與檔名",
+        )
+        if not save_path:
+          return
+        df.to_csv(save_path, index=False, encoding="utf-8-sig")
+      elif export_format == "md":
+        save_path = filedialog.asksaveasfilename(
+            defaultextension=".md",
+            filetypes=[("Markdown 檔案", "*.md")],
+            title="選擇儲存 Markdown 檔案位置與檔名",
+        )
+        if not save_path:
+          return
+        # 手動將 DataFrame 轉為 Markdown 表格字串
+        headers = list(df.columns)
+        header_str = " | ".join(str(h) for h in headers)
+        sep_str = " | ".join("---" for _ in headers)
+        md_lines = [f"| {header_str} |", f"| {sep_str} |"]
+        for _, row in df.iterrows():
+          row_str = " | ".join(
+              str(val) if pd.notna(val) and val != "" else "" for val in row
+          )
+          md_lines.append(f"| {row_str} |")
 
-      df.to_excel(save_path, index=False)
+        with open(save_path, "w", encoding="utf-8") as md_f:
+          md_f.write("\n".join(md_lines))
+      else:
+        save_path = filedialog.asksaveasfilename(
+            defaultextension=".xlsx",
+            filetypes=[("Excel 檔案", "*.xlsx")],
+            title="選擇儲存 Excel 檔案位置與檔名",
+        )
+        if not save_path:
+          return
+        df.to_excel(save_path, index=False)
 
       if conflict_reports:
         warning_msg = (
