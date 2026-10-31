@@ -80,7 +80,7 @@
 
     <!-- 圖表渲染與互動邏輯 -->
     <script>
-        const rawChartData = {{ chart_json | tojson | safe0 }};
+        const rawChartData = {{ chart_json | tojson | safe }};
         let myChart = null;
 
         if (rawChartData && rawChartData.datasets) {
