@@ -217,23 +217,23 @@
                         title: { display: true, text: '日期' },
                         grid: { color: '#e5e7eb' }
                     },
-                    y: {
+                    y: {  // ⬅️ 確保主、次格線完全綁定於垂直座標軸 (Y 軸)
                         min: yMin,
                         max: yMax,
                         ticks: { 
-                            stepSize: stepSize 
+                            stepSize: stepSize // 主要格線步進（Y 軸主刻度）
                         },
                         grid: {
-                            color: '#9ca3af', // 主要格線顏色加深
+                            color: '#9ca3af',      // 垂直座標軸的主要格線顏色（較深）
                             lineWidth: 1,
                             minor: {
-                                display: true,
-                                color: '#f3f4f6'
+                                display: true,     // 顯示垂直座標軸的次要格線
+                                color: '#f3f4f6'   // 次要格線顏色（較淡）
                             }
                         },
                         minor: {
-                            stepSize: minorStepSize,
-                            display: false
+                            stepSize: minorStepSize, // 次要格線步進（Y 軸次刻度）
+                            display: false           // 次要格線不顯示數字刻度
                         }
                     }
                 }
