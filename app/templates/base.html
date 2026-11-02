@@ -14,13 +14,22 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-json.min.js"></script>
     <style>
         @media print {
-            .no-print {
-                display: none !important;
+            body, html {
+                height: auto !important;
+                overflow: visible !important;
+                background: white !important;
             }
-
-            .print-only-chart {
-                width: 100% !important;
-                height: 100vh !important;
+            .no-print { display: none !important; }
+            .print-only-chart { 
+                width: 100% !important; 
+                height: auto !important; 
+                max-height: 85vh !important;
+                page-break-after: avoid;
+                page-break-inside: avoid;
+            }
+            .shadow-md, .rounded-xl {
+                box-shadow: none !important;
+                border: none !important;
             }
         }
     </style>

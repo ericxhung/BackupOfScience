@@ -192,32 +192,32 @@
         });
     }
 
-    // 儲存為 1920x1080 圖片
+    // 修正後的 1920x1080 圖片下載功能
     function downloadPNG() {
         if (!chartInstance) return;
+        
+        // 取得畫面上目前的圖表 canvas 元素
+        const sourceCanvas = document.getElementById('customChart');
+        
+        // 建立 1920x1080 的高解析度暫存畫布
         const offCanvas = document.createElement('canvas');
         offCanvas.width = 1920;
         offCanvas.height = 1080;
-        const offCtx = offCanvas.getContext('2d');
+        const ctx = offCanvas.getContext('2d');
 
-        offCtx.fillStyle = '#ffffff';
-        offCtx.fillRect(0, 0, 1920, 1080);
+        // 填入乾淨的白色背景
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, 1920, 1080);
 
-        const tempChart = new Chart(offCtx, {
-            type: 'line',
-            data: chartInstance.data,
-            options: {
-                ...chartInstance.options,
-                animation: false,
-                responsive: false
-            }
-        });
+        // 將原圖等比例或直接延展繪製到 1920x1080
+        ctx.drawImage(sourceCanvas, 0, 0, 1920, 1080);
 
+        // 觸發下載
         const link = document.createElement('a');
         link.download = 'chart_1920x1080.png';
         link.href = offCanvas.toDataURL('image/png');
         link.click();
-        tempChart.destroy();
     }
+
 </script>
 {% endblock %}
