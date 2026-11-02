@@ -4,30 +4,58 @@
 {% block content %}
 <div class="flex flex-col md:flex-row gap-6">
     <!-- 左側控制面板 -->
-    <div class="w-full md:w-1/4 bg-white p-4 rounded-xl shadow-md no-print flex flex-col h-[750px]">
+    <div class="w-full md:w-1/4 bg-white p-4 rounded-xl shadow-md no-print flex flex-col h-[850px] overflow-y-auto">
         <h2 class="text-lg font-bold text-gray-700 mb-3">🔍 選擇項目</h2>
-
+        
         <!-- 搜尋欄 -->
-        <input type="text" id="searchInput" placeholder="搜尋項目名稱..."
-            class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm mb-3 focus:outline-none focus:border-blue-500"
-            oninput="filterItems()">
+        <input type="text" id="searchInput" placeholder="搜尋項目名稱..." 
+               class="w-full border border-gray-300 rounded px-3 py-1.5 text-sm mb-3 focus:outline-none focus:border-blue-500"
+               oninput="filterItems()">
 
         <div class="flex gap-2 mb-3">
-            <button onclick="selectAll(true)"
-                class="text-xs bg-gray-200 hover:bg-gray-300 px-2 py-1 rounded w-1/2">全選</button>
-            <button onclick="selectAll(false)"
-                class="text-xs bg-gray-200 hover:bg-gray-300 px-2 py-1 rounded w-1/2">全不選</button>
+            <button onclick="selectAll(true)" class="text-xs bg-gray-200 hover:bg-gray-300 px-2 py-1 rounded w-1/2">全選</button>
+            <button onclick="selectAll(false)" class="text-xs bg-gray-200 hover:bg-gray-300 px-2 py-1 rounded w-1/2">全不選</button>
         </div>
 
         <!-- 項目列表 (逐一勾選) -->
-        <div id="itemList" class="flex-grow overflow-y-auto space-y-2 pr-1 border-t pt-2 text-sm">
+        <div id="itemList" class="max-h-60 overflow-y-auto space-y-2 pr-1 border-t border-b py-2 text-sm mb-4">
             {% for item in items %}
             <label class="item-row flex items-center space-x-2 p-1.5 rounded hover:bg-gray-50 cursor-pointer">
-                <input type="checkbox" value="{{ item }}" class="item-checkbox rounded text-blue-600"
-                    onchange="renderChart()">
+                <input type="checkbox" value="{{ item }}" class="item-checkbox rounded text-blue-600" onchange="renderChart()">
                 <span class="truncate">{{ item }}</span>
             </label>
             {% endfor %}
+        </div>
+
+        <!-- ⚙️ Y 軸自訂設定面板 -->
+        <div class="mt-auto pt-2 border-t border-gray-200">
+            <h3 class="text-sm font-bold text-gray-700 mb-2">⚙️ Y 軸格線與範圍設定</h3>
+            <div class="space-y-2 text-xs">
+                <div>
+                    <label class="block text-gray-600 mb-1">1. 下限 (預設 0):</label>
+                    <input type="number" id="yMinInput" value="0" step="any" 
+                           class="w-full border border-gray-300 rounded px-2 py-1 focus:outline-none focus:border-blue-500" 
+                           oninput="renderChart()">
+                </div>
+                <div>
+                    <label class="block text-gray-600 mb-1">2. 上限 (預設 10的倍數):</label>
+                    <input type="number" id="yMaxInput" placeholder="自動 (數據上限向上取10的倍數)" step="any" 
+                           class="w-full border border-gray-300 rounded px-2 py-1 focus:outline-none focus:border-blue-500" 
+                           oninput="renderChart()">
+                </div>
+                <div>
+                    <label class="block text-gray-600 mb-1">3. 主要格線步進 (預設 5):</label>
+                    <input type="number" id="majorStepInput" value="5" step="any" 
+                           class="w-full border border-gray-300 rounded px-2 py-1 focus:outline-none focus:border-blue-500" 
+                           oninput="renderChart()">
+                </div>
+                <div>
+                    <label class="block text-gray-600 mb-1">4. 次要格線步進 (預設 1):</label>
+                    <input type="number" id="minorStepInput" value="1" step="any" 
+                           class="w-full border border-gray-300 rounded px-2 py-1 focus:outline-none focus:border-blue-500" 
+                           oninput="renderChart()">
+                </div>
+            </div>
         </div>
     </div>
 
@@ -36,12 +64,8 @@
         <div class="flex justify-between items-center mb-4 no-print">
             <h2 class="text-xl font-bold text-gray-700">📈 實驗數據折線圖</h2>
             <div class="space-x-2">
-                <button onclick="downloadPNG()"
-                    class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700">🖼️ 儲存圖片
-                    (1920x1080)</button>
-                <button onclick="window.print()"
-                    class="px-3 py-1.5 bg-green-600 text-white rounded text-sm font-medium hover:bg-green-700">🖨️
-                    列印圖表</button>
+                <button onclick="downloadPNG()" class="px-3 py-1.5 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700">🖼️ 儲存圖片 (1920x1080)</button>
+                <button onclick="window.print()" class="px-3 py-1.5 bg-green-600 text-white rounded text-sm font-medium hover:bg-green-700">🖨️ 列印圖表</button>
             </div>
         </div>
 
@@ -55,12 +79,24 @@
 <script>
     const itemDataMap = {{ item_data_map | safe }};
     const allDates = {{ dates | tojson }};
+    const defaultSelected = {{ default_selected | safe }};
     let chartInstance = null;
 
     const colors = [
-        '#3b82f6', '#ef4444', '#10b981', '#f59e0b',
+        '#3b82f6', '#ef4444', '#10b981', '#f59e0b', 
         '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'
     ];
+
+    document.addEventListener('DOMContentLoaded', () => {
+        document.querySelectorAll('.item-checkbox').forEach(cb => {
+            if (defaultSelected.length > 0) {
+                cb.checked = defaultSelected.includes(cb.value);
+            } else {
+                cb.checked = false;
+            }
+        });
+        renderChart();
+    });
 
     function filterItems() {
         const query = document.getElementById('searchInput').value.toLowerCase();
@@ -77,23 +113,20 @@
         renderChart();
     }
 
-    // 計算最佳刻度步幅 (10, 5, 2, 1, 0.1 倍數)
-    function calculateNiceStep(range) {
-        if (range <= 0) return 1;
-        const roughStep = range / 6;
-        const exponent = Math.floor(Math.log10(roughStep));
-        const fraction = roughStep / Math.pow(10, exponent);
-
-        let niceFraction;
-        if (fraction < 1.5) niceFraction = 1;
-        else if (fraction < 3) niceFraction = 2;
-        else if (fraction < 7) niceFraction = 5;
-        else niceFraction = 10;
-
-        return niceFraction * Math.pow(10, exponent);
+    function updateURLParams() {
+        const checked = Array.from(document.querySelectorAll('.item-checkbox:checked')).map(cb => cb.value);
+        const url = new URL(window.location);
+        if (checked.length > 0) {
+            url.searchParams.set('items', checked.join(','));
+        } else {
+            url.searchParams.delete('items');
+        }
+        window.history.replaceState({}, '', url);
     }
 
     function renderChart() {
+        updateURLParams();
+
         const checkedBoxes = Array.from(document.querySelectorAll('.item-checkbox:checked'));
         const selectedItems = checkedBoxes.map(cb => cb.value);
 
@@ -102,7 +135,6 @@
             return;
         }
 
-        // 1. 找出橫軸 (日期) 範圍：最開始與最最後
         let minDateIdx = allDates.length;
         let maxDateIdx = -1;
         let globalMinY = Infinity;
@@ -128,14 +160,32 @@
 
         const filteredDates = allDates.slice(minDateIdx, maxDateIdx + 1);
 
-        // 2. 縱軸上限/下限與格線計算
-        if (globalMinY === Infinity) { globalMinY = 0; globalMaxY = 10; }
-        const range = globalMaxY - globalMinY;
-        const stepSize = calculateNiceStep(range);
-        const yMin = Math.floor(globalMinY / stepSize) * stepSize;
-        const yMax = Math.ceil(globalMaxY / stepSize) * stepSize;
+        if (globalMaxY === -Infinity) globalMaxY = 10;
 
-        // 3. 建立 Datasets
+        // 讀取使用者自訂的 Y 軸參數
+        const customMin = document.getElementById('yMinInput').value;
+        const customMax = document.getElementById('yMaxInput').value;
+        const customMajorStep = document.getElementById('majorStepInput').value;
+        const customMinorStep = document.getElementById('minorStepInput').value;
+
+        // 1. 下限 (預設 0)
+        let yMin = customMin !== '' ? parseFloat(customMin) : 0;
+
+        // 2. 上限 (預設是數據上限向上取 10 的倍數)
+        let yMax;
+        if (customMax !== '') {
+            yMax = parseFloat(customMax);
+        } else {
+            yMax = Math.ceil(globalMaxY / 10) * 10;
+            if (yMax <= yMin) yMax = yMin + 10;
+        }
+
+        // 3. 主要格線步進 (預設 5)
+        let stepSize = customMajorStep !== '' ? parseFloat(customMajorStep) : 5;
+
+        // 4. 次要格線步進 (預設 1)
+        let minorStepSize = customMinorStep !== '' ? parseFloat(customMinorStep) : 1;
+
         const datasets = selectedItems.map((item, idx) => {
             const points = itemDataMap[item] || [];
             const dataVector = filteredDates.map(d => {
@@ -153,7 +203,6 @@
             };
         });
 
-        // 4. 繪製圖表
         const ctx = document.getElementById('customChart').getContext('2d');
         if (chartInstance) chartInstance.destroy();
 
@@ -164,27 +213,27 @@
                 responsive: true,
                 maintainAspectRatio: false,
                 scales: {
-                    x: {
+                    x: { 
                         title: { display: true, text: '日期' },
                         grid: { color: '#e5e7eb' }
                     },
                     y: {
                         min: yMin,
                         max: yMax,
-                        ticks: {
-                            stepSize: stepSize // 主要格線間距
+                        ticks: { 
+                            stepSize: stepSize 
                         },
                         grid: {
-                            color: '#9ca3af',       // ⬅️ 主要格線顏色加深（灰色，更加清晰易見）
-                            lineWidth: 1,           // 格線粗細
+                            color: '#9ca3af', // 主要格線顏色加深
+                            lineWidth: 1,
                             minor: {
-                                display: true,      // 顯示次要格線
-                                color: '#f3f4f6'    // 次要格線保持較淡
+                                display: true,
+                                color: '#f3f4f6'
                             }
                         },
                         minor: {
-                            stepSize: stepSize / 2, // 次要格線為主要的一半
-                            display: false          // ❌ 次要格線不顯示刻度數字
+                            stepSize: minorStepSize,
+                            display: false
                         }
                     }
                 }
@@ -192,32 +241,22 @@
         });
     }
 
-    // 修正後的 1920x1080 圖片下載功能
     function downloadPNG() {
         if (!chartInstance) return;
-        
-        // 取得畫面上目前的圖表 canvas 元素
         const sourceCanvas = document.getElementById('customChart');
-        
-        // 建立 1920x1080 的高解析度暫存畫布
         const offCanvas = document.createElement('canvas');
         offCanvas.width = 1920;
         offCanvas.height = 1080;
         const ctx = offCanvas.getContext('2d');
 
-        // 填入乾淨的白色背景
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(0, 0, 1920, 1080);
-
-        // 將原圖等比例或直接延展繪製到 1920x1080
         ctx.drawImage(sourceCanvas, 0, 0, 1920, 1080);
 
-        // 觸發下載
         const link = document.createElement('a');
         link.download = 'chart_1920x1080.png';
         link.href = offCanvas.toDataURL('image/png');
         link.click();
     }
-
 </script>
 {% endblock %}
