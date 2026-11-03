@@ -14,7 +14,7 @@ class ExcelProcessorApp(tk.Tk):
 
   def __init__(self):
     super().__init__()
-    self.title("Excel 資料處理與列印整合工具 (框線與字體優化版)")
+    self.title("Excel 資料處理與列印整合工具 (全欄寬19.38版)")
     self.geometry("900x750")
 
     # 數據整理全域變數
@@ -401,26 +401,10 @@ class ExcelProcessorApp(tk.Tk):
         for c in range(1, 4):
           out_sheet.cell(row=r, column=c).border = table_border
 
-      # 調整縱列寬度（A欄忽略A1，B欄固定為27.14）
+      # 將所有縱列寬度一律設定為 19.38
       for col in out_sheet.columns:
         col_letter = openpyxl.utils.get_column_letter(col[0].column)
-
-        if col_letter == "B":
-          out_sheet.column_dimensions[col_letter].width = 27.14
-          continue
-
-        max_len = 0
-        for cell in col:
-          if cell.value is not None:
-            if col_letter == "A" and cell.row == 1:
-              continue
-
-            val_str = str(cell.value)
-            length = sum(2 if ord(c) > 127 else 1 for c in val_str)
-            max_len = max(max_len, length)
-        out_sheet.column_dimensions[col_letter].width = max(
-            int(max_len * 2.5) + 6, 18
-        )
+        out_sheet.column_dimensions[col_letter].width = 19.38
 
       save_path = filedialog.asksaveasfilename(
           defaultextension=".xlsx",
