@@ -84,4 +84,4 @@ if __name__ == "__main__":
     app = FullscreenImageApp(root, image_file)
     root.mainloop()
     cmd("git add . && git commit -m \"Backup\" && git push -u origin main")
-    input("按下 Enter ")
+    input("按下 Enter 關閉")
