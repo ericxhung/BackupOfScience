@@ -6,7 +6,7 @@ from datetime import datetime
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 import openpyxl
-from openpyxl.styles import Font
+from openpyxl.styles import Border, Font, Side
 import pandas as pd
 
 
@@ -14,7 +14,7 @@ class ExcelProcessorApp(tk.Tk):
 
   def __init__(self):
     super().__init__()
-    self.title("Excel 資料處理與列印整合工具 (Markdown匯出支援版)")
+    self.title("Excel 資料處理與列印整合工具 (框線與字體優化版)")
     self.geometry("900x750")
 
     # 數據整理全域變數
@@ -384,13 +384,22 @@ class ExcelProcessorApp(tk.Tk):
         out_sheet[f"C{current_row}"] = a0
         current_row += 1
 
-      # 字體大小改為 26
+      # 字體大小改為 10
       for row in out_sheet.iter_rows():
         for cell in row:
           current_font = cell.font
           bold = current_font.bold if current_font else False
           italic = current_font.italic if current_font else False
-          cell.font = Font(name="Arial", size=26, bold=bold, italic=italic)
+          cell.font = Font(name="Arial", size=10, bold=bold, italic=italic)
+
+      # 替項目數據表格加入所有框線 (從第 3 行到最後一列，A 欄到 C 欄)
+      thin_side = Side(style="thin", color="000000")
+      table_border = Border(
+          left=thin_side, right=thin_side, top=thin_side, bottom=thin_side
+      )
+      for r in range(3, current_row):
+        for c in range(1, 4):
+          out_sheet.cell(row=r, column=c).border = table_border
 
       # 調整縱列寬度（A欄忽略A1，B欄固定為27.14）
       for col in out_sheet.columns:
@@ -425,7 +434,7 @@ class ExcelProcessorApp(tk.Tk):
       out_wb.save(save_path)
       messagebox.showinfo("成功", f"列印用 Excel 檔案已成功生成至：\n{save_path}")
 
-      # 自動用 Excel 開啟剛剛儲存的檔案 (Windows 專用)
+      # 自動用 Excel 開啟剛剛儲存的檔案 (Windows 專用，視窗保持開啟)
       try:
         os.startfile(save_path)
       except Exception as e:
@@ -920,7 +929,7 @@ class ExcelProcessorApp(tk.Tk):
     )
     txt_info.pack(padx=20, pady=5)
 
-    # 匯出格式選擇選項 (新增 Markdown)
+    # 匯出格式選擇選項
     format_frame = ttk.LabelFrame(
         self.container, text="選擇匯出檔案格式", padding=10
     )
@@ -1084,7 +1093,6 @@ class ExcelProcessorApp(tk.Tk):
         )
         if not save_path:
           return
-        # 手動將 DataFrame 轉為 Markdown 表格字串
         headers = list(df.columns)
         header_str = " | ".join(str(h) for h in headers)
         sep_str = " | ".join("---" for _ in headers)
