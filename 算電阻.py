@@ -23,6 +23,14 @@ def process_excel_safe():
     if number is None:
         print("沒有輸入數字，程式已取消。")
         return
+    S1 = simpledialog.askstring("輸入數值", "平均值第一格:")
+    if number is None:
+        print("沒有輸入數字，程式已取消。")
+        return
+    S2 = simpledialog.askstring("輸入數值", "平均值最後一格:")
+    if number is None:
+        print("沒有輸入數字，程式已取消。")
+        return
 
     # 將路徑轉為 Windows 絕對路徑，避免 COM 元件找不到檔案
     file_path = os.path.abspath(file_path)
@@ -48,7 +56,7 @@ def process_excel_safe():
                 continue
             
             # 在 I2 寫入平均公式
-            sheet.Range("I2").Formula = "=AVERAGE(D2:D21)"
+            sheet.Range("I2").Formula = f"=AVERAGE({S1}:{S2})"
             
             # 在 I3 寫入自定義公式，帶入使用者輸入的數字
             sheet.Range("I3").Formula = f"={number}*(1023-I2)/I2"
