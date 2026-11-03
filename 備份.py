@@ -1,87 +1,123 @@
+import glob
+import os
+import random
 import tkinter as tk
-from os import system as cmd
 from PIL import Image, ImageTk
 
 
-class FullscreenImageApp:
+class SlideshowApp:
 
-    def __init__(self, root, image_path):
+    def __init__(self, root):
         self.root = root
-        self.image_path = image_path
 
-        # 1. 設定視窗全螢幕並隱藏滑鼠游標（增加沉浸感）
+        # 1. 設定全螢幕與隱藏滑鼠游標
         self.root.attributes("-fullscreen", True)
         self.root.config(cursor="none")
 
-        # 2. 取得螢幕的寬高
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
+        self.screen_width = self.root.winfo_screenwidth()
+        self.screen_height = self.root.winfo_screenheight()
 
-        # 3. 載入圖片並縮放到符合螢幕大小
-        try:
-            pil_image = Image.open(self.image_path)
-            # 使用高品質濾鏡縮放圖片
-            pil_image = pil_image.resize(
-                (screen_width, screen_height), Image.Resampling.LANCZOS
-            )
-            self.img = ImageTk.PhotoImage(pil_image)
-        except Exception as e:
-            print(f"圖片載入失敗，請檢查路徑或檔名是否正確: {e}")
+        # 2. 自動讀取 ./image 資料夾底下的所有圖片
+        image_extensions = ("*.jpg", "*.jpeg", "*.png", "*.bmp", "*.webp")
+        self.image_paths = []
+        for ext in image_extensions:
+            self.image_paths.extend(glob.glob(os.path.join("image", ext)))
+
+        # 安全檢查：如果資料夾是空的就直接結束
+        if not self.image_paths:
+            print("錯誤：在 './image' 資料夾中找不到任何圖片檔案！")
             self.root.destroy()
             return
 
-        # 4. 建立畫布來放置圖片
+        # 隨機打亂圖片順序
+        random.shuffle(self.image_paths)
+        self.current_index = 0
+
+        # 3. 建立畫布
         self.canvas = tk.Canvas(
-            root, width=screen_width, height=screen_height, highlightthickness=0
+            root,
+            width=self.screen_width,
+            height=self.screen_height,
+            highlightthickness=0,
         )
         self.canvas.pack(fill="both", expand=True)
-        self.canvas.create_image(0, 0, anchor="nw", image=self.img)
 
-        # 5. 在右上角建立倒數計時文字
-        self.time_left = 3
+        # 4. 設定總倒數時間（5秒）
+        self.time_left = 5
         self.countdown_text = self.canvas.create_text(
-            screen_width - 80,
+            self.screen_width - 80,
             60,
             text=str(self.time_left),
             fill="red",
             font=("Arial", 50, "bold"),
         )
 
-        # 6. 綁定按鍵：Caps Lock 與 Esc 作為緊急關閉
+        # 5. 綁定緊急關閉按鍵（Caps Lock 與 Esc）
         self.root.bind("<Caps_Lock>", self.emergency_close)
         self.root.bind("<Key>", self.check_key)
 
-        # 7. 開始倒數計時
-        self.update_countdown()
+        # 6. 開始顯示第一張圖片並啟動 5 秒倒數計時
+        self.show_next_image()
+        self.update_timer()
 
-    def update_countdown(self):
-        """每秒更新倒數時間，時間到就關閉程式"""
+    def show_next_image(self):
+        """顯示目前的圖片，每秒切換一張，若輪完則循環"""
+        if not self.image_paths:
+            return
+
+        img_path = self.image_paths[self.current_index]
+        try:
+            pil_image = Image.open(img_path)
+            pil_image = pil_image.resize(
+                (self.screen_width, self.screen_height),
+                Image.Resampling.LANCZOS,
+            )
+            self.img = ImageTk.PhotoImage(pil_image)
+
+            # 更新或建立畫布上的圖片
+            if hasattr(self, "image_item"):
+                self.canvas.itemconfig(self.image_item, image=self.img)
+            else:
+                self.image_item = self.canvas.create_image(
+                    0, 0, anchor="nw", image=self.img
+                )
+                # 確保右上角倒數文字永遠浮在圖片上方
+                self.canvas.tag_raise(self.countdown_text)
+
+        except Exception as e:
+            print(f"無法載入圖片 {img_path}: {e}")
+
+        # 移動到下一張圖片索引（若超過清單長度則用 % 讓它從頭循環）
+        self.current_index = (self.current_index + 1) % len(self.image_paths)
+
+        # 只要總時間還沒到 5 秒，就排程在 1 秒後換下一張圖
+        if self.time_left > 0:
+            self.root.after(1000, self.show_next_image)
+
+    def update_timer(self):
+        """每秒更新右上角的 5 秒倒數，時間到自動關閉"""
         if self.time_left > 0:
             self.canvas.itemconfig(
                 self.countdown_text, text=str(self.time_left)
             )
             self.time_left -= 1
-            self.root.after(1000, self.update_countdown)  # 1000 毫秒 = 1 秒
+            self.root.after(1000, self.update_timer)
         else:
             self.root.destroy()
 
     def emergency_close(self, event):
-        """Caps Lock 觸發的關閉函式"""
+        """Caps Lock 觸發緊急關閉"""
         self.root.destroy()
 
     def check_key(self, event):
-        """備用按鍵檢查（如果按 Esc 也能關閉）"""
+        """Esc 備用關閉"""
         if event.keysym == "Escape":
             self.root.destroy()
 
 
 if __name__ == "__main__":
     root = tk.Tk()
-
-    # ⚠️ 請把底部的 "your_image.jpg" 改成你要顯示的圖片檔名或完整路徑
-    image_file = "丁丁.jpg"
-
-    app = FullscreenImageApp(root, image_file)
+    app = SlideshowApp(root)
     root.mainloop()
-    cmd("git add . && git commit -m \"Backup\" && git push -u origin main")
+    os.system("git add . && git commit -m \"Backup\" && git push -u origin main")
     input("按下 Enter 關閉")
