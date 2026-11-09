@@ -108,11 +108,13 @@ class SlideshowApp:
     def emergency_close(self, event):
         """Caps Lock 觸發緊急關閉"""
         self.root.destroy()
+        os._exit(0)
 
     def check_key(self, event):
         """Esc 備用關閉"""
         if event.keysym == "Escape":
             self.root.destroy()
+            os._exit(0)
 
 
 if __name__ == "__main__":
