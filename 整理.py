@@ -1,13 +1,37 @@
+import ctypes
 import json
 import os
 import re
 import string
+import sys
 from datetime import datetime
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
+import tkinter.font as tkfont
 import openpyxl
 from openpyxl.styles import Border, Font, Side
 import pandas as pd
+
+# 【UI 美化】嘗試載入 sv-ttk（Windows 11 風格主題）。
+# 沒安裝也能執行，只是會退回原本的 tkinter 外觀。
+try:
+  import sv_ttk
+
+  HAS_SV_TTK = True
+except ImportError:
+  HAS_SV_TTK = False
+
+
+# 【UI 美化】Windows 高 DPI 設定：避免在高解析度螢幕上字體模糊
+def enable_high_dpi():
+  if sys.platform == "win32":
+    try:
+      ctypes.windll.shcore.SetProcessDpiAwareness(1)
+    except Exception:
+      try:
+        ctypes.windll.user32.SetProcessDPIAware()
+      except Exception:
+        pass
 
 
 class ExcelProcessorApp(tk.Tk):
@@ -15,18 +39,117 @@ class ExcelProcessorApp(tk.Tk):
   def __init__(self):
     super().__init__()
     self.title("Excel 資料處理與列印整合工具 (全欄寬19.38版)")
-    self.geometry("900x750")
+
+    # 【UI 美化】依螢幕縮放比例調整視窗大小
+    self.scale = max(1.0, self.winfo_fpixels("1i") / 96.0)
+    self.geometry(f"{self.px(900)}x{self.px(750)}")
+    self.minsize(self.px(820), self.px(650))
+
+    # 【UI 美化】套用主題、統一字型、設定樣式
+    self.setup_theme()
+    self.setup_fonts()
+    self.setup_styles()
 
     # 數據整理全域變數
     self.file_list = []
     self.item_mapping = {}
     self.mode_var = tk.StringVar(value="RESISTOR")
 
-    self.container = ttk.Frame(self)
+    self.container = ttk.Frame(self, padding=10)
     self.container.pack(fill="both", expand=True)
 
     # 進入點：顯示系統主頁
     self.show_main_home()
+
+  # ==================== UI 美化輔助函式 ====================
+  def px(self, n):
+    return int(n * self.scale)
+
+  def setup_theme(self):
+    if HAS_SV_TTK:
+      sv_ttk.set_theme("light")
+    else:
+      try:
+        ttk.Style().theme_use("vista")
+      except tk.TclError:
+        pass
+
+  def setup_fonts(self):
+    families = set(tkfont.families())
+    self.base_family = None
+    for cand in (
+        "Microsoft JhengHei UI",
+        "Microsoft JhengHei",
+        "PingFang TC",
+        "Noto Sans CJK TC",
+        "Arial",
+    ):
+      if cand in families:
+        self.base_family = cand
+        break
+    if self.base_family is None:
+      self.base_family = tkfont.nametofont("TkDefaultFont").actual("family")
+
+    for name in (
+        "TkDefaultFont",
+        "TkTextFont",
+        "TkMenuFont",
+        "TkHeadingFont",
+        "TkCaptionFont",
+        "SunValleyCaptionFont",
+        "SunValleyBodyFont",
+        "SunValleyBodyStrongFont",
+        "SunValleyBodyLargeFont",
+        "SunValleySubtitleFont",
+        "SunValleyTitleFont",
+        "SunValleyTitleLargeFont",
+        "SunValleyDisplayFont",
+    ):
+      try:
+        tkfont.nametofont(name).configure(family=self.base_family)
+      except tk.TclError:
+        pass
+
+    self.font_title = (self.base_family, 20, "bold")
+    self.font_h2 = (self.base_family, 14, "bold")
+    self.font_list = (self.base_family, 11)
+
+  def setup_styles(self):
+    style = ttk.Style()
+    style.configure("Treeview", rowheight=self.px(28))
+    style.configure("Title.TLabel", font=self.font_title)
+    style.configure("H2.TLabel", font=self.font_h2)
+    style.configure("Hint.TLabel", foreground="#666666")
+    style.configure("Big.TButton", font=(self.base_family, 12))
+
+    # 【首頁放大】只給主選單頁使用，其他頁面不受影響
+    style.configure(
+        "HomeTitle.TLabel", font=(self.base_family, 34, "bold")
+    )
+    style.configure(
+        "HomeSub.TLabel", font=(self.base_family, 16), foreground="#666666"
+    )
+    style.configure(
+        "Home.Accent.TButton", font=(self.base_family, 18, "bold")
+    )
+
+    # 給舊式 tk 元件 (Listbox / Canvas / Toplevel) 用的顏色，讓它們跟主題一致
+    try:
+      bg = style.lookup(".", "background")
+      self.theme_bg = bg if bg else "#fafafa"
+    except tk.TclError:
+      self.theme_bg = "#fafafa"
+    self.theme_fg = "#1c1c1c"
+    self.theme_select_bg = "#0067c0"
+
+  def center_dialog(self, top, w, h):
+    w, h = self.px(w), self.px(h)
+    self.update_idletasks()
+    x = self.winfo_rootx() + (self.winfo_width() - w) // 2
+    y = self.winfo_rooty() + (self.winfo_height() - h) // 2
+    top.geometry(f"{w}x{h}+{max(x, 0)}+{max(y, 0)}")
+    top.configure(bg=self.theme_bg)
+    top.transient(self)
 
   def clear_container(self):
     for widget in self.container.winfo_children():
@@ -36,29 +159,39 @@ class ExcelProcessorApp(tk.Tk):
   def show_main_home(self):
     self.clear_container()
 
-    lbl_title = ttk.Label(
-        self.container, text="Excel 資料處理系統", font=("Arial", 18, "bold")
-    )
-    lbl_title.pack(pady=40)
+    center = ttk.Frame(self.container)
+    center.place(relx=0.5, rely=0.42, anchor="center")
 
-    btn_frame = ttk.Frame(self.container)
-    btn_frame.pack(pady=20)
+    lbl_title = ttk.Label(
+        center, text="Excel 資料處理系統", style="HomeTitle.TLabel"
+    )
+    lbl_title.pack(pady=(0, 10))
+
+    lbl_sub = ttk.Label(
+        center, text="請選擇要使用的功能", style="HomeSub.TLabel"
+    )
+    lbl_sub.pack(pady=(0, 40))
+
+    btn_frame = ttk.Frame(center)
+    btn_frame.pack()
 
     btn_print = ttk.Button(
         btn_frame,
         text="🖨️ 數據列印",
-        width=25,
+        width=22,
+        style="Home.Accent.TButton",
         command=self.show_print_mode_select,
     )
-    btn_print.pack(pady=15, ipady=10)
+    btn_print.pack(pady=14, ipady=self.px(18))
 
     btn_organize = ttk.Button(
         btn_frame,
         text="📊 數據整理",
-        width=25,
+        width=22,
+        style="Home.Accent.TButton",
         command=self.show_step1_home,
     )
-    btn_organize.pack(pady=15, ipady=10)
+    btn_organize.pack(pady=14, ipady=self.px(18))
 
   # ==================== 數據列印功能區 ====================
   def show_print_mode_select(self):
@@ -88,13 +221,13 @@ class ExcelProcessorApp(tk.Tk):
     self.clear_container()
 
     lbl_title = ttk.Label(
-        self.container, text="數據列印設定", font=("Arial", 14, "bold")
+        self.container, text="數據列印設定", style="H2.TLabel"
     )
     lbl_title.pack(pady=10)
 
     # 1. 上方設定區域 (日期與氣象參數)
     top_frame = ttk.LabelFrame(
-        self.container, text="基本資訊設定", padding=10
+        self.container, text="基本資訊設定", padding=12
     )
     top_frame.pack(fill="x", padx=20, pady=5)
 
@@ -232,7 +365,9 @@ class ExcelProcessorApp(tk.Tk):
     )
     list_frame.pack(fill="both", expand=True, padx=20, pady=10)
 
-    canvas = tk.Canvas(list_frame)
+    canvas = tk.Canvas(
+        list_frame, bg=self.theme_bg, highlightthickness=0, borderwidth=0
+    )
     scrollbar = ttk.Scrollbar(
         list_frame, orient="vertical", command=canvas.yview
     )
@@ -268,7 +403,10 @@ class ExcelProcessorApp(tk.Tk):
     btn_back.pack(side="left")
 
     btn_confirm = ttk.Button(
-        bottom_frame, text="確定 (生成列印用 Excel)", command=self.generate_print_excel
+        bottom_frame,
+        text="確定 (生成列印用 Excel)",
+        style="Accent.TButton",
+        command=self.generate_print_excel,
     )
     btn_confirm.pack(side="right")
 
@@ -434,12 +572,12 @@ class ExcelProcessorApp(tk.Tk):
     lbl_title = ttk.Label(
         self.container,
         text="【數據整理】步驟一：選擇模式與管理 Excel 檔案",
-        font=("Arial", 14, "bold"),
+        style="H2.TLabel",
     )
     lbl_title.pack(pady=10)
 
     mode_frame = ttk.LabelFrame(
-        self.container, text="搜尋模式設定", padding=10
+        self.container, text="搜尋模式設定", padding=12
     )
     mode_frame.pack(fill="x", padx=20, pady=5)
 
@@ -449,7 +587,7 @@ class ExcelProcessorApp(tk.Tk):
         value="RESISTOR",
         variable=self.mode_var,
     )
-    radio_resistor.pack(anchor="w", pady=2)
+    radio_resistor.pack(anchor="w", pady=3)
 
     radio_average = ttk.Radiobutton(
         mode_frame,
@@ -457,10 +595,10 @@ class ExcelProcessorApp(tk.Tk):
         value="AVERAGE",
         variable=self.mode_var,
     )
-    radio_average.pack(anchor="w", pady=2)
+    radio_average.pack(anchor="w", pady=3)
 
     btn_frame = ttk.Frame(self.container)
-    btn_frame.pack(fill="x", padx=20, pady=5)
+    btn_frame.pack(fill="x", padx=20, pady=8)
 
     btn_add_files = ttk.Button(
         btn_frame, text="加入 Excel 檔案", command=self.add_excel_files
@@ -481,9 +619,9 @@ class ExcelProcessorApp(tk.Tk):
     self.tree_step1.heading("Filename", text="檔案名稱")
     self.tree_step1.heading("Date", text="解析日期 (YYYY-MM-DD)")
     self.tree_step1.heading("Path", text="完整路徑")
-    self.tree_step1.column("Filename", width=220)
-    self.tree_step1.column("Date", width=150)
-    self.tree_step1.column("Path", width=380)
+    self.tree_step1.column("Filename", width=self.px(220))
+    self.tree_step1.column("Date", width=self.px(150))
+    self.tree_step1.column("Path", width=self.px(380))
     self.tree_step1.pack(side="left", fill="both", expand=True)
 
     scrollbar = ttk.Scrollbar(
@@ -506,7 +644,10 @@ class ExcelProcessorApp(tk.Tk):
     btn_remove.pack(side="left", padx=5)
 
     btn_next = ttk.Button(
-        bottom_frame, text="下一步 (管理與排序項目)", command=self.go_to_step2
+        bottom_frame,
+        text="下一步 (管理與排序項目)",
+        style="Accent.TButton",
+        command=self.go_to_step2,
     )
     btn_next.pack(side="right")
 
@@ -534,21 +675,23 @@ class ExcelProcessorApp(tk.Tk):
   def request_manual_date(self, filename, folder_name):
     top = tk.Toplevel(self)
     top.title(f"無法辨識日期: {filename}")
-    top.geometry("420x200")
+    self.center_dialog(top, 460, 220)
     top.grab_set()
 
+    body = ttk.Frame(top, padding=15)
+    body.pack(fill="both", expand=True)
+
     ttk.Label(
-        top,
+        body,
         text=(
             f"無法從檔名 '{filename}' 或資料夾 '{folder_name}' 辨識日期。\n"
             "請手動輸入正確日期（格式：YYYY MM DD），或點擊「不加入」略過："
         ),
-        padding=10,
-        wraplength=400,
-    ).pack()
+        wraplength=self.px(420),
+    ).pack(anchor="w")
 
-    entry_date = ttk.Entry(top, width=25)
-    entry_date.pack(pady=5)
+    entry_date = ttk.Entry(body, width=25)
+    entry_date.pack(pady=10)
     entry_date.insert(0, "2026 01 01")
 
     result_date = [None]
@@ -575,12 +718,12 @@ class ExcelProcessorApp(tk.Tk):
       result_date[0] = "SKIP"
       top.destroy()
 
-    btn_frame = ttk.Frame(top)
+    btn_frame = ttk.Frame(body)
     btn_frame.pack(pady=10)
 
-    ttk.Button(btn_frame, text="確定加入", command=on_submit).pack(
-        side="left", padx=5
-    )
+    ttk.Button(
+        btn_frame, text="確定加入", style="Accent.TButton", command=on_submit
+    ).pack(side="left", padx=5)
     ttk.Button(btn_frame, text="不加入", command=on_cancel).pack(
         side="left", padx=5
     )
@@ -667,7 +810,7 @@ class ExcelProcessorApp(tk.Tk):
     lbl_title = ttk.Label(
         self.container,
         text="【數據整理】步驟二：管理項目順序、合併與刪除工作表",
-        font=("Arial", 14, "bold"),
+        style="H2.TLabel",
     )
     lbl_title.pack(pady=10)
 
@@ -705,14 +848,28 @@ class ExcelProcessorApp(tk.Tk):
             "在此可調整項目上下順序、合併項目，或刪除不需要的項目。\n"
             "(提示：設定會自動儲存至 setting.json)"
         ),
+        style="Hint.TLabel",
     )
     lbl_info.pack(anchor="w", padx=20, pady=5)
 
     main_mgmt_frame = ttk.Frame(self.container)
     main_mgmt_frame.pack(fill="both", expand=True, padx=20, pady=5)
 
+    # 【UI 美化】Listbox 是舊式 tk 元件，手動設定顏色與邊框讓它跟主題一致
     self.listbox_items = tk.Listbox(
-        main_mgmt_frame, selectmode=tk.EXTENDED, font=("Arial", 11)
+        main_mgmt_frame,
+        selectmode=tk.EXTENDED,
+        font=self.font_list,
+        bg="#ffffff",
+        fg=self.theme_fg,
+        selectbackground=self.theme_select_bg,
+        selectforeground="#ffffff",
+        activestyle="none",
+        relief="flat",
+        borderwidth=0,
+        highlightthickness=1,
+        highlightbackground="#d0d0d0",
+        highlightcolor=self.theme_select_bg,
     )
     self.listbox_items.pack(side="left", fill="both", expand=True)
 
@@ -759,7 +916,10 @@ class ExcelProcessorApp(tk.Tk):
     btn_back.pack(side="left")
 
     btn_next = ttk.Button(
-        bottom_frame, text="下一步 (開始計算並輸出)", command=self.go_to_step3
+        bottom_frame,
+        text="下一步 (開始計算並輸出)",
+        style="Accent.TButton",
+        command=self.go_to_step3,
     )
     btn_next.pack(side="right")
 
@@ -833,22 +993,24 @@ class ExcelProcessorApp(tk.Tk):
 
     top = tk.Toplevel(self)
     top.title("合併項目與選擇代表名稱")
-    top.geometry("420x220")
+    self.center_dialog(top, 460, 260)
     top.grab_set()
 
+    body = ttk.Frame(top, padding=15)
+    body.pack(fill="both", expand=True)
+
     ttk.Label(
-        top,
+        body,
         text=(
             f"準備合併以下項目：\n{', '.join(selected_names)}\n\n"
             "請選擇其中一個作為最終的代表名稱："
         ),
-        padding=10,
-        wraplength=400,
-    ).pack()
+        wraplength=self.px(420),
+    ).pack(anchor="w")
 
     combo_var = tk.StringVar(value=selected_names[0])
     combo_names = ttk.Combobox(
-        top,
+        body,
         textvariable=combo_var,
         values=selected_names,
         state="readonly",
@@ -878,7 +1040,9 @@ class ExcelProcessorApp(tk.Tk):
       top.destroy()
       messagebox.showinfo("成功", f"已成功將項目合併，代表名稱為：{chosen_name}")
 
-    ttk.Button(top, text="確認合併", command=on_confirm).pack(pady=10)
+    ttk.Button(
+        body, text="確認合併", style="Accent.TButton", command=on_confirm
+    ).pack(pady=10)
 
   def go_to_step3(self):
     if not self.item_mapping:
@@ -893,7 +1057,7 @@ class ExcelProcessorApp(tk.Tk):
     lbl_title = ttk.Label(
         self.container,
         text="【數據整理】步驟三：自動搜尋儲存格、計算與矩陣匯出",
-        font=("Arial", 14, "bold"),
+        style="H2.TLabel",
     )
     lbl_title.pack(pady=10)
 
@@ -910,12 +1074,13 @@ class ExcelProcessorApp(tk.Tk):
             "已完成所有設定與項目管理。\n"
             "請選擇下方匯出格式，並點擊按鈕開始運算與匯出。"
         ),
+        justify="left",
     )
     txt_info.pack(padx=20, pady=5)
 
     # 匯出格式選擇選項
     format_frame = ttk.LabelFrame(
-        self.container, text="選擇匯出檔案格式", padding=10
+        self.container, text="選擇匯出檔案格式", padding=12
     )
     format_frame.pack(fill="x", padx=20, pady=10)
 
@@ -925,24 +1090,27 @@ class ExcelProcessorApp(tk.Tk):
         text="Excel 試算表 (*.xlsx)",
         value="xlsx",
         variable=self.export_format_var,
-    ).pack(anchor="w", pady=2)
+    ).pack(anchor="w", pady=3)
     ttk.Radiobutton(
         format_frame,
         text="CSV 純文字表格 (*.csv)",
         value="csv",
         variable=self.export_format_var,
-    ).pack(anchor="w", pady=2)
+    ).pack(anchor="w", pady=3)
     ttk.Radiobutton(
         format_frame,
         text="Markdown 表格 (*.md)",
         value="md",
         variable=self.export_format_var,
-    ).pack(anchor="w", pady=2)
+    ).pack(anchor="w", pady=3)
 
     btn_run = ttk.Button(
-        self.container, text="開始計算並儲存", command=self.process_and_export
+        self.container,
+        text="開始計算並儲存",
+        style="Accent.TButton",
+        command=self.process_and_export,
     )
-    btn_run.pack(pady=10)
+    btn_run.pack(pady=10, ipady=4)
 
     btn_back_frame = ttk.Frame(self.container)
     btn_back = ttk.Button(
@@ -1123,5 +1291,7 @@ class ExcelProcessorApp(tk.Tk):
 
 
 if __name__ == "__main__":
+  # 【UI 美化】必須在建立視窗之前呼叫，高 DPI 設定才會生效
+  enable_high_dpi()
   app = ExcelProcessorApp()
   app.mainloop()
