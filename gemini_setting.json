@@ -1,0 +1,13 @@
+{
+  "provider": "OpenAI 格式",
+  "remember": true,
+  "gemini": {
+    "model": "gemini-3.5-flash-lite",
+    "api_key": "AIzaSyBvTIb7i_8uR-FjddHVba5oPhF1NqRihHQ"
+  },
+  "openai": {
+    "model": "nvidia/nemotron-3.5-super-vl:free",
+    "base_url": "https://openrouter.ai/api/v1",
+    "api_key": "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"
+  }
+}
