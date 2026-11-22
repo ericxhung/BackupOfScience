@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "ui": {
+    "geometry": "2560x1334+38+44",
+    "font_percent": 140.0
+  },
+  "reference": {
+    "path": "C:/Users/USER/Downloads/518085260_10240020381435781_8879008109306680321_n.jpg",
+    "map": [
+      839.1360048856096,
+      540.47,
+      961.4093523311327,
+      585.14
+    ],
+    "size": [
+      1600,
+      801
+    ]
+  },
+  "params": {
+    "var_sens": 2.0,
+    "var_tol": 1.5,
+    "var_dpi": 300.0,
+    "var_mode": "ImageJ(RGB平均)",
+    "var_degamma": false,
+    "var_deg": "1",
+    "var_norm": false,
+    "var_bg": false,
+    "var_label": false,
+    "var_hand": false,
+    "var_snap": true,
+    "var_drag": "spec",
+    "var_alpha": 0.32608695652173914,
+    "var_refs": "534.04, 540.47, 576.36, 585.14, 587.99, 594.30, 597.27, 602.71, 606.92, 609.39, 613.97, 621.39, 626.22, 630.43, 633.27, 640.32, 650.84, 653.69, 660.62, 668.66, 672.49"
+  },
+  "dirs": {
+    "photo": "C:/Users/USER/Documents/科資/光譜/2026_11_19",
+    "ref": "C:/Users/USER/Downloads",
+    "out": "C:/Users/USER/Downloads"
+  }
+}

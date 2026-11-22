@@ -18,8 +18,10 @@ import math
 import pickle
 import statistics
 import subprocess
+import tempfile
 import time
 import unicodedata
+import webbrowser
 import csv
 import io
 import queue
@@ -36,6 +38,14 @@ try:
   HAS_SV_TTK = True
 except ImportError:
   HAS_SV_TTK = False
+
+# 【檢視模式】互動圖表用 plotly（在瀏覽器開啟）；沒安裝就只能用視窗內的 matplotlib 圖。
+try:
+  import plotly.graph_objects as go
+
+  HAS_PLOTLY = True
+except Exception:
+  HAS_PLOTLY = False
 
 # 【檢視模式】圖表用 matplotlib；沒安裝也能執行，只是圖表分頁會提示要安裝。
 try:
@@ -853,6 +863,18 @@ def _cat_label(c, layout, cats):
   return str(c)
 
 
+def _mpl_theme(fig, ax):
+  fg = PAL["fg"]
+  fig.set_facecolor(PAL["plot_bg"])
+  ax.set_facecolor(PAL["plot_bg"])
+  ax.tick_params(colors=fg)
+  ax.xaxis.label.set_color(fg)
+  ax.yaxis.label.set_color(fg)
+  for sp in ax.spines.values():
+    sp.set_color(PAL["axis"])
+  ax.grid(True, color=PAL["grid"], alpha=0.8, linewidth=0.8)
+
+
 def draw_chart(fig, points, layout, ctype, connect=True, y_label="數值", item_order=None):
   """在 fig 上畫圖。ctype: 'scatter' | 'line' | 'bar'。回傳統計 dict。"""
   fig.clear()
@@ -867,6 +889,7 @@ def draw_chart(fig, points, layout, ctype, connect=True, y_label="數值", item_
         transform=ax.transAxes, fontsize=14, color="#888888",
     )
     ax.set_axis_off()
+    fig.set_facecolor(PAL["plot_bg"])
     return stats
 
   labels = list(series.keys())
@@ -946,13 +969,98 @@ def draw_chart(fig, points, layout, ctype, connect=True, y_label="數值", item_
   rows = math.ceil(S / ncol)
   fig.legend(
       *ax.get_legend_handles_labels(), loc="lower center", ncol=ncol,
-      fontsize=9 if S <= 15 else 8, frameon=False,
+      fontsize=9 if S <= 15 else 8, frameon=False, labelcolor=PAL["fg"],
   )
   for side in ("top", "right"):
     ax.spines[side].set_visible(False)
   ax.set_axisbelow(True)
   fig.subplots_adjust(
       left=0.08, right=0.98, top=0.95, bottom=min(0.5, 0.20 + 0.045 * rows)
+  )
+  _mpl_theme(fig, ax)
+  return stats
+
+
+PLOTLY_COLORS = [
+    "#4C78A8", "#F58518", "#54A24B", "#E45756", "#72B7B2", "#B79A20",
+    "#B279A2", "#FF9DA6", "#9D755D", "#7F7F7F", "#A0CBE8", "#FFBE7D",
+    "#8CD17D", "#FF9D9A", "#86BCB6", "#F1CE63", "#D4A6C8", "#FABFD2",
+    "#D7B5A6", "#BAB0AC",
+]
+PLOTLY_SYMBOLS = [
+    "circle", "square", "diamond", "triangle-up", "triangle-down", "cross",
+    "x", "star",
+]
+
+
+def build_plotly_html(points, layout, ctype, connect, y_label, item_order, path):
+  """用 plotly 畫互動圖，存成可離線開啟的 HTML。回傳統計 dict。"""
+  series, cats, skipped = _prepare_series(points, layout, item_order)
+  total = sum(len(v) for v in series.values())
+  missing = sum(1 for v in series.values() for _, y in v if y is None)
+  stats = {"points": total, "missing": missing, "skipped": skipped}
+  if total - missing <= 0:
+    return stats
+  cat_text = [_cat_label(c, layout, cats) for c in cats]
+  text_of = dict(zip(cats, cat_text))
+  fig = go.Figure()
+  for si, (label, pts) in enumerate(series.items()):
+    color = PLOTLY_COLORS[si % len(PLOTLY_COLORS)]
+    if ctype == "bar":
+      good = [(text_of[xk], y) for xk, y in pts if y is not None]
+      fig.add_trace(go.Bar(
+          x=[g[0] for g in good], y=[g[1] for g in good], name=label,
+          marker=dict(color=color),
+          hovertemplate="<b>%{fullData.name}</b><br>%{x}<br>" + y_label + "：%{y:.4f}<extra></extra>",
+      ))
+      continue
+    if layout == "num_series":
+      pts = sorted(pts, key=lambda t: t[0])
+      xs = [xk for xk, _ in pts]
+    elif layout == "date_item":
+      xs = [xk for xk, _ in pts]
+    else:
+      xs = [text_of[xk] for xk, _ in pts]
+    ys = [y for _, y in pts]
+    mode = "lines+markers" if (ctype == "line" and connect) else "markers"
+    fig.add_trace(go.Scatter(
+        x=xs, y=ys, name=label, mode=mode, connectgaps=False,
+        line=dict(color=color, width=2.5),
+        marker=dict(
+            color=color, size=9, symbol=PLOTLY_SYMBOLS[si % len(PLOTLY_SYMBOLS)],
+            line=dict(color=PAL["plot_bg"], width=1),
+        ),
+        hovertemplate="<b>%{fullData.name}</b><br>%{x}<br>" + y_label + "：%{y:.4f}<extra></extra>",
+    ))
+  x_title = {"date_item": "日期", "item_date": "項目", "num_series": "項目中的數字"}[layout]
+  fig.update_layout(
+      template="plotly_dark" if PAL["dark"] else "plotly_white",
+      paper_bgcolor=PAL["plot_bg"],
+      font=dict(
+          family="Microsoft JhengHei, PingFang TC, Noto Sans CJK TC, sans-serif",
+          size=14, color=PAL["fg"],
+      ),
+      xaxis=dict(title=x_title, gridcolor=PAL["grid"], showline=True, linecolor=PAL["axis"], zeroline=False),
+      yaxis=dict(title=y_label, gridcolor=PAL["grid"], showline=True, linecolor=PAL["axis"], zeroline=False),
+      hovermode="closest",
+      barmode="group",
+      legend=dict(title=dict(text="點圖例開關（雙擊只看單一項）"), bgcolor=PAL["legend_bg"]),
+      margin=dict(l=70, r=30, t=40, b=70),
+      plot_bgcolor=PAL["plot_bg"],
+  )
+  if ctype == "bar":
+    fig.update_xaxes(type="category", categoryorder="array", categoryarray=cat_text)
+  elif layout == "date_item":
+    fig.update_xaxes(type="date")
+    if len(cats) <= 14:
+      fig.update_xaxes(tickmode="array", tickvals=cats, ticktext=cat_text)
+  elif layout == "item_date":
+    fig.update_xaxes(type="category", categoryorder="array", categoryarray=cat_text)
+  fig.write_html(
+      path, include_plotlyjs=True, full_html=True,
+      default_width="100%", default_height="97vh",
+      config={"responsive": True, "displaylogo": False,
+              "toImageButtonOptions": {"format": "png", "scale": 2}},
   )
   return stats
 
@@ -1100,8 +1208,8 @@ class RangeDialog(tk.Toplevel):
     sb = ttk.Scrollbar(box, orient="vertical", command=self.tree.yview)
     sb.pack(side="right", fill="y")
     self.tree.configure(yscrollcommand=sb.set)
-    self.tree.tag_configure("warn", foreground="#c0392b")
-    self.tree.tag_configure("empty", foreground="#999999")
+    self.tree.tag_configure("warn", foreground=PAL["warn"])
+    self.tree.tag_configure("empty", foreground=PAL["faint"])
     self.tree.bind("<<TreeviewSelect>>", lambda e: self._on_select())
 
     ed = ttk.LabelFrame(body, text="編輯選取的列", padding=10)
@@ -1272,11 +1380,95 @@ class RangeDialog(tk.Toplevel):
 
 # ==================== 檢視模式（日曆／圖表／概況）====================
 VIEW_FILE = "view_setting.json"
-CAL_BORDER = "#d0d0d0"
-CAL_HAS = "#e8f1fb"
-CAL_TODAY = "#0067c0"
-CAL_LINK = "#0067c0"
-CAL_MUTED = "#666666"
+
+THEME_FILE = "theme_setting.json"
+PALETTES = {
+    "light": {
+        "dark": False, "fg": "#1c1c1c", "text2": "#444444", "muted": "#666666",
+        "faint": "#999999", "card": "#ffffff", "card_border": "#d0d0d0",
+        "accent": "#0067c0", "sel_bg": "#0067c0", "sel_fg": "#ffffff",
+        "has": "#e8f1fb", "hover": "#eaf2fb", "code_bg": "#eceff1",
+        "block_bg": "#f3f4f6", "link": "#0067c0", "warn": "#c0392b",
+        "ai": "#26a269", "popup_border": "#b8b8b8", "plot_bg": "#ffffff",
+        "grid": "#eceff3", "axis": "#c9ced6", "legend_bg": "rgba(255,255,255,0.8)",
+    },
+    "tech": {
+        "dark": True, "fg": "#e6edf7", "text2": "#b6c4dc", "muted": "#8b9bb4",
+        "faint": "#6c7a92", "card": "#10182a", "card_border": "#2b3f66",
+        "accent": "#57c8ff", "sel_bg": "#1f4f8f", "sel_fg": "#ffffff",
+        "has": "#14284a", "hover": "#1b2c4d", "code_bg": "#1b2740",
+        "block_bg": "#0c1424", "link": "#57c8ff", "warn": "#ff6b6b",
+        "ai": "#3ddc97", "popup_border": "#57c8ff", "plot_bg": "#0d1424",
+        "grid": "#22304d", "axis": "#3a4d73", "legend_bg": "rgba(13,20,36,0.8)",
+    },
+}
+PAL = dict(PALETTES["light"])
+CAL_BORDER = CAL_HAS = CAL_TODAY = CAL_LINK = CAL_MUTED = ""
+
+
+def set_palette(name):
+  """切換色票（同時更新日曆用的舊式常數）。"""
+  global CAL_BORDER, CAL_HAS, CAL_TODAY, CAL_LINK, CAL_MUTED
+  PAL.clear()
+  PAL.update(PALETTES.get(name, PALETTES["light"]))
+  CAL_BORDER = PAL["card_border"]
+  CAL_HAS = PAL["has"]
+  CAL_TODAY = PAL["accent"]
+  CAL_LINK = PAL["link"]
+  CAL_MUTED = PAL["muted"]
+
+
+set_palette("light")
+
+
+UI_SCALE_CHOICES = (0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0)
+
+
+def _load_prefs():
+  try:
+    with open(os.path.join(os.getcwd(), THEME_FILE), "r", encoding="utf-8") as f:
+      d = json.load(f)
+    return d if isinstance(d, dict) else {}
+  except Exception:
+    return {}
+
+
+def _save_prefs(**kw):
+  d = _load_prefs()
+  d.update(kw)
+  try:
+    with open(os.path.join(os.getcwd(), THEME_FILE), "w", encoding="utf-8") as f:
+      json.dump(d, f, ensure_ascii=False)
+  except Exception:
+    pass
+
+
+def load_theme_setting():
+  t = _load_prefs().get("theme")
+  return t if t in PALETTES else "light"
+
+
+def save_theme_setting(name):
+  _save_prefs(theme=name)
+
+
+def load_ui_scale():
+  v = _load_prefs().get("ui_scale")
+  return float(v) if isinstance(v, (int, float)) and 0.5 <= v <= 3 else 1.0
+
+
+def save_ui_scale(v):
+  _save_prefs(ui_scale=v)
+
+
+def listbox_colors():
+  return dict(
+      bg=PAL["card"], fg=PAL["fg"], selectbackground=PAL["sel_bg"],
+      selectforeground=PAL["sel_fg"], relief="flat", borderwidth=0,
+      highlightthickness=1, highlightbackground=PAL["card_border"],
+      highlightcolor=PAL["accent"],
+  )
+
 SRC_LABELS = [
     "Rx 電阻（自動判斷公式）",
     "A0 平均（自動判斷公式）",
@@ -1343,13 +1535,13 @@ class CheckList(ttk.Frame):
     body.pack(fill="both", expand=True, pady=(2, 0))
     self.canvas = tk.Canvas(
         body, height=height_px, highlightthickness=1,
-        highlightbackground="#cfcfcf", bg="#ffffff",
+        highlightbackground=PAL["card_border"], bg=PAL["card"],
     )
     sb = ttk.Scrollbar(body, orient="vertical", command=self.canvas.yview)
     self.canvas.configure(yscrollcommand=sb.set)
     self.canvas.pack(side="left", fill="both", expand=True)
     sb.pack(side="right", fill="y")
-    self.inner = tk.Frame(self.canvas, bg="#ffffff")
+    self.inner = tk.Frame(self.canvas, bg=PAL["card"])
     self.win = self.canvas.create_window((0, 0), window=self.inner, anchor="nw")
     self.inner.bind(
         "<Configure>",
@@ -1369,8 +1561,9 @@ class CheckList(ttk.Frame):
     for text in labels:
       v = tk.BooleanVar(value=checked)
       cb = tk.Checkbutton(
-          self.inner, text=text, variable=v, anchor="w", bg="#ffffff",
-          activebackground="#eaf2fb", font=(self.fam, 10), bd=0,
+          self.inner, text=text, variable=v, anchor="w", bg=PAL["card"],
+          fg=PAL["fg"], activebackground=PAL["hover"], activeforeground=PAL["fg"],
+          selectcolor=PAL["card"], font=(self.fam, 10), bd=0,
           highlightthickness=0,
       )
       cb.pack(fill="x", anchor="w")
@@ -1663,14 +1856,14 @@ def md_setup_tags(txt, fam):
   txt.tag_configure("md_h3", font=(fam, 11, "bold"), spacing1=4, spacing3=2)
   txt.tag_configure("md_b", font=(fam, 10, "bold"))
   txt.tag_configure("md_i", font=(fam, 10, "italic"))
-  txt.tag_configure("md_code", font=(mono, 10), background="#eceff1")
+  txt.tag_configure("md_code", font=(mono, 10), background=PAL["code_bg"])
   txt.tag_configure(
-      "md_block", font=(mono, 10), background="#f3f4f6", lmargin1=14, lmargin2=14
+      "md_block", font=(mono, 10), background=PAL["block_bg"], lmargin1=14, lmargin2=14
   )
   txt.tag_configure("md_table", font=(mono, 10), lmargin1=8, lmargin2=8)
-  txt.tag_configure("md_quote", foreground="#666666", lmargin1=14, lmargin2=14)
-  txt.tag_configure("md_link", foreground="#1a5fb4", underline=True)
-  txt.tag_configure("md_hr", foreground="#bbbbbb")
+  txt.tag_configure("md_quote", foreground=PAL["muted"], lmargin1=14, lmargin2=14)
+  txt.tag_configure("md_link", foreground=PAL["link"], underline=True)
+  txt.tag_configure("md_hr", foreground=PAL["faint"])
 
 
 def _disp_width(t):
@@ -1915,7 +2108,8 @@ class ViewPage:
         anchor="w"
     )
     lb = tk.Listbox(
-        body, selectmode=tk.EXTENDED, font=(self.fam, 10), activestyle="none"
+        body, selectmode=tk.EXTENDED, font=(self.fam, 10), activestyle="none",
+        **listbox_colors()
     )
     lb.pack(fill="both", expand=True, pady=6)
     for p in self.extra_files:
@@ -2067,7 +2261,8 @@ class ViewPage:
         t, text="無日期或讀取失敗的檔案（雙擊開啟）", padding=4
     )
     self.lst_undated = tk.Listbox(
-        self.box_undated, height=3, font=(self.fam, 9), activestyle="none"
+        self.box_undated, height=3, font=(self.fam, 9), activestyle="none",
+        **listbox_colors()
     )
     self.lst_undated.pack(fill="x")
     self.lst_undated.bind("<Double-Button-1>", self._open_undated)
@@ -2129,7 +2324,8 @@ class ViewPage:
     grid.pack(fill="both", expand=True)
     for c, name in enumerate(["日", "一", "二", "三", "四", "五", "六"]):
       tk.Label(
-          grid, text=name, bg=self.app.theme_bg, font=(self.fam, 10, "bold")
+          grid, text=name, bg=self.app.theme_bg, fg=PAL["fg"],
+          font=(self.fam, 10, "bold"),
       ).grid(row=0, column=c, sticky="nsew", pady=(0, 2))
       grid.columnconfigure(c, weight=1, uniform="day")
     weeks = calendar.Calendar(firstweekday=6).monthdayscalendar(y, m)
@@ -2142,7 +2338,7 @@ class ViewPage:
         date_str = f"{y:04d}-{m:02d}-{day:02d}"
         infos = self.date_map.get(date_str, [])
         has = bool(infos)
-        bg = CAL_HAS if has else "#ffffff"
+        bg = CAL_HAS if has else PAL["card"]
         is_today = date_str == today
         cell = tk.Frame(
             grid,
@@ -2156,7 +2352,7 @@ class ViewPage:
             cell,
             text=str(day),
             bg=bg,
-            fg="#1c1c1c" if has else CAL_MUTED,
+            fg=PAL["fg"] if has else CAL_MUTED,
             font=(self.fam, 10, "bold" if has else "normal"),
             anchor="w",
         ).pack(anchor="w", padx=4, pady=(2, 0))
@@ -2247,14 +2443,14 @@ class ViewPage:
     if self.popup is not None and self.popup_owner is cell:
       return
     self._destroy_popup()
-    white = "#ffffff"
+    white = PAL["card"]
     pop = tk.Toplevel(self.frame)
     pop.overrideredirect(True)
     try:
       pop.attributes("-topmost", True)
     except tk.TclError:
       pass
-    pop.configure(bg="#b8b8b8")
+    pop.configure(bg=PAL["popup_border"])
     date_text = self.app.date_text_of(infos[0])
     sw, sh = pop.winfo_screenwidth(), pop.winfo_screenheight()
     limit_h = sh - 90  # 預留工作列
@@ -2271,6 +2467,7 @@ class ViewPage:
           inner,
           text=f"{date_text}（{len(infos)} 個 Excel）",
           bg=white,
+          fg=PAL["fg"],
           font=(self.fam, 10, "bold"),
           anchor="w",
       ).pack(fill="x")
@@ -2283,13 +2480,13 @@ class ViewPage:
         if max_items == 0:
           if items:
             tk.Label(
-                inner, text=f"　共 {len(items)} 個項目", bg=white, fg="#444444",
+                inner, text=f"　共 {len(items)} 個項目", bg=white, fg=PAL["text2"],
                 font=(self.fam, 9), anchor="w",
             ).pack(anchor="w")
         else:
           for name in items[:max_items]:
             tk.Label(
-                inner, text="　• " + name, bg=white, fg="#444444",
+                inner, text="　• " + name, bg=white, fg=PAL["text2"],
                 font=(self.fam, 9), anchor="w",
             ).pack(anchor="w")
           if len(items) > max_items:
@@ -2373,6 +2570,19 @@ class ViewPage:
         left, text="折線圖把各點連起來", variable=self.var_connect
     ).pack(anchor="w", pady=(0, 6))
 
+    ttk.Label(left, text="顯示方式").pack(anchor="w")
+    vf = ttk.Frame(left)
+    vf.pack(anchor="w", pady=(0, 6))
+    self.var_view = tk.StringVar(value="browser" if HAS_PLOTLY else "inline")
+    ttk.Radiobutton(
+        vf, text="瀏覽器互動圖", value="browser", variable=self.var_view
+    ).pack(side="left", padx=(0, 10))
+    ttk.Radiobutton(
+        vf, text="視窗內（舊式）", value="inline", variable=self.var_view
+    ).pack(side="left")
+    self.plot_dir = None
+    self.plot_files = []
+
     ttk.Label(left, text="y 軸取值方式").pack(anchor="w")
     self.cmb_src = ttk.Combobox(
         left, values=SRC_LABELS, state="readonly", width=40
@@ -2409,7 +2619,7 @@ class ViewPage:
     self.canvas = None
     if HAS_MPL and HAS_MPL_TK:
       setup_mpl_fonts()
-      self.fig = Figure(figsize=(7, 5), dpi=100, facecolor="#ffffff")
+      self.fig = Figure(figsize=(7, 5), dpi=100, facecolor=PAL["plot_bg"])
       self.canvas = FigureCanvasTkAgg(self.fig, master=right)
       toolbar = NavigationToolbar2Tk(self.canvas, right, pack_toolbar=False)
       toolbar.update()
@@ -2464,7 +2674,15 @@ class ViewPage:
     )
 
   def draw(self):
-    if self.fig is None:
+    browser = self.var_view.get() == "browser"
+    if browser and not HAS_PLOTLY:
+      messagebox.showinfo(
+          "提示",
+          "互動圖需要 plotly，請先在命令列執行：pip install plotly\n"
+          "安裝後重新開啟程式即可。\n\n（也可以把「顯示方式」改成「視窗內」。）",
+      )
+      return
+    if not browser and self.fig is None:
       messagebox.showinfo("提示", "需要先安裝 matplotlib：pip install matplotlib")
       return
     dates = [self.chart_dates[i] for i in self.chk_dates.checked()]
@@ -2489,11 +2707,43 @@ class ViewPage:
     )
     self.last_points = points
     layout = LAYOUT_KEYS[self.cmb_layout.current()]
-    st = draw_chart(
-        self.fig, points, layout, self.var_ctype.get(),
-        self.var_connect.get(), Y_LABELS[source], self.chart_items,
-    )
-    self.canvas.draw_idle()
+    if browser:
+      if self.plot_dir is None:
+        self.plot_dir = tempfile.mkdtemp(prefix="excel_chart_")
+      path = os.path.join(self.plot_dir, f"chart_{int(time.time() * 1000)}.html")
+      try:
+        st = build_plotly_html(
+            points, layout, self.var_ctype.get(), self.var_connect.get(),
+            Y_LABELS[source], self.chart_items, path,
+        )
+      except Exception as e:
+        messagebox.showerror("畫圖失敗", f"產生互動圖時發生錯誤：\n{e}")
+        return
+      if st["points"] - st["missing"] <= 0:
+        messagebox.showinfo("提示", "沒有可以畫的數據。")
+      else:
+        self.plot_files.append(path)
+        for old in self.plot_files[:-5]:  # 只留最近 5 張，避免暫存檔越積越多
+          try:
+            os.remove(old)
+          except OSError:
+            pass
+        self.plot_files = self.plot_files[-5:]
+        webbrowser.open("file:///" + path.replace("\\", "/"))
+      if self.fig is not None:
+        self.fig.clear()
+        self.fig.text(
+            0.5, 0.5, "圖表已在瀏覽器開啟\n（要在這裡看，請把「顯示方式」改成「視窗內」）",
+            ha="center", va="center", fontsize=13, color=PAL["muted"],
+        )
+        self.fig.set_facecolor(PAL["plot_bg"])
+        self.canvas.draw_idle()
+    else:
+      st = draw_chart(
+          self.fig, points, layout, self.var_ctype.get(),
+          self.var_connect.get(), Y_LABELS[source], self.chart_items,
+      )
+      self.canvas.draw_idle()
     msg = f"共 {st['points']} 個點"
     if st["missing"]:
       msg += f"，其中 {st['missing']} 個沒有數值（圖上留空）"
@@ -2630,8 +2880,8 @@ class ViewPage:
         ("item", "項目", 120), ("date", "日期", 100), ("file", "檔案", 230),
         ("rx", "Rx", 100), ("diff", "與基準差", 110), ("pct", "變化 %", 100),
     ])
-    self.tree_trend.tag_configure("base", foreground="#1a5fb4")
-    self.tree_trend.tag_configure("none", foreground="#999999")
+    self.tree_trend.tag_configure("base", foreground=PAL["accent"])
+    self.tree_trend.tag_configure("none", foreground=PAL["faint"])
     self.trend_rows = []
 
   def _refresh_trend_choices(self):
@@ -2807,20 +3057,26 @@ class ViewPage:
     box.pack(fill="both", expand=True)
     self.txt_chat = tk.Text(
         box, wrap="word", state="disabled", font=(self.fam, 10), height=12,
-        padx=8, pady=6,
+        padx=8, pady=6, bg=PAL["card"], fg=PAL["fg"], insertbackground=PAL["fg"],
+        relief="flat", highlightthickness=1, highlightbackground=PAL["card_border"],
     )
     sb = ttk.Scrollbar(box, orient="vertical", command=self.txt_chat.yview)
     self.txt_chat.configure(yscrollcommand=sb.set)
     self.txt_chat.pack(side="left", fill="both", expand=True)
     sb.pack(side="right", fill="y")
     md_setup_tags(self.txt_chat, self.fam)
-    self.txt_chat.tag_configure("me", foreground="#1a5fb4", font=(self.fam, 10, "bold"))
-    self.txt_chat.tag_configure("ai", foreground="#26a269", font=(self.fam, 10, "bold"))
-    self.txt_chat.tag_configure("sys", foreground="#888888")
+    self.txt_chat.tag_configure("me", foreground=PAL["accent"], font=(self.fam, 10, "bold"))
+    self.txt_chat.tag_configure("ai", foreground=PAL["ai"], font=(self.fam, 10, "bold"))
+    self.txt_chat.tag_configure("sys", foreground=PAL["faint"])
 
     inp = ttk.Frame(right)
     inp.pack(fill="x", pady=(6, 0))
-    self.txt_ask = tk.Text(inp, height=4, wrap="word", font=(self.fam, 10), padx=6, pady=4)
+    self.txt_ask = tk.Text(
+        inp, height=4, wrap="word", font=(self.fam, 10), padx=6, pady=4,
+        bg=PAL["card"], fg=PAL["fg"], insertbackground=PAL["fg"], relief="flat",
+        highlightthickness=1, highlightbackground=PAL["card_border"],
+        highlightcolor=PAL["accent"],
+    )
     self.txt_ask.pack(side="left", fill="x", expand=True)
     self.txt_ask.bind("<Return>", self._ai_enter)
     bf = ttk.Frame(inp)
@@ -3115,7 +3371,7 @@ class ViewPage:
         ("std", "標準差", 100), ("min", "最小", 90), ("max", "最大", 90),
         ("miss", "沒有數值次數", 110), ("odd", "疑似異常（偏離平均 >3 倍標準差）", 300),
     ])
-    self.tree_items.tag_configure("odd", foreground="#c0392b")
+    self.tree_items.tag_configure("odd", foreground=PAL["warn"])
 
   def _refresh_overview(self):
     self.tree_files.delete(*self.tree_files.get_children())
@@ -3195,11 +3451,19 @@ class ExcelProcessorApp(tk.Tk):
     self.title("Excel 資料處理與列印整合工具")
 
     # 【UI 美化】依螢幕縮放比例調整視窗大小
-    self.scale = max(1.0, self.winfo_fpixels("1i") / 96.0)
+    # base_tk_scaling＝Windows 顯示縮放換算出來的原始值；ui_scale＝程式內「介面大小」倍率
+    self.base_tk_scaling = float(self.tk.call("tk", "scaling"))
+    self.ui_scale = load_ui_scale()
+    self.tk.call("tk", "scaling", self.base_tk_scaling * self.ui_scale)
+    self.scale = max(0.6, self.winfo_fpixels("1i") / 96.0)
     self.geometry(f"{self.px(900)}x{self.px(750)}")
     self.minsize(self.px(820), self.px(650))
 
     # 【UI 美化】套用主題、統一字型、設定樣式
+    self.theme_name = load_theme_setting()
+    if self.theme_name == "tech" and not HAS_SV_TTK:
+      self.theme_name = "light"  # 科技深色需要 sv-ttk
+    set_palette(self.theme_name)
     self.setup_theme()
     self.setup_fonts()
     self.setup_styles()
@@ -3226,7 +3490,7 @@ class ExcelProcessorApp(tk.Tk):
 
   def setup_theme(self):
     if HAS_SV_TTK:
-      sv_ttk.set_theme("light")
+      sv_ttk.set_theme("dark" if self.theme_name == "tech" else "light")
     else:
       try:
         ttk.Style().theme_use("vista")
@@ -3273,12 +3537,37 @@ class ExcelProcessorApp(tk.Tk):
     self.font_h2 = (self.base_family, 14, "bold")
     self.font_list = (self.base_family, 11)
 
+  FONT_NAMES = (
+      "TkDefaultFont", "TkTextFont", "TkMenuFont", "TkHeadingFont",
+      "TkCaptionFont", "TkSmallCaptionFont", "TkFixedFont", "TkTooltipFont",
+      "SunValleyCaptionFont", "SunValleyBodyFont", "SunValleyBodyStrongFont",
+      "SunValleyBodyLargeFont", "SunValleySubtitleFont", "SunValleyTitleFont",
+      "SunValleyTitleLargeFont", "SunValleyDisplayFont",
+  )
+
+  def scale_pixel_fonts(self):
+    """sv-ttk 的字體大小是「像素」（負數），不會跟著 Windows 縮放，所以這裡手動乘上縮放倍率。"""
+    if not hasattr(self, "_font_base"):
+      self._font_base = {}
+    for name in self.FONT_NAMES:
+      try:
+        f = tkfont.nametofont(name)
+        if name not in self._font_base:
+          size = int(f.cget("size"))
+          self._font_base[name] = size if size < 0 else None
+        base = self._font_base[name]
+        if base is not None:
+          f.configure(size=-max(8, int(round(abs(base) * self.scale))))
+      except (tk.TclError, ValueError):
+        pass
+
   def setup_styles(self):
+    self.scale_pixel_fonts()
     style = ttk.Style()
     style.configure("Treeview", rowheight=self.px(28))
     style.configure("Title.TLabel", font=self.font_title)
     style.configure("H2.TLabel", font=self.font_h2)
-    style.configure("Hint.TLabel", foreground="#666666")
+    style.configure("Hint.TLabel", foreground=PAL["muted"])
     style.configure("Big.TButton", font=(self.base_family, 12))
 
     # 【首頁放大】只給主選單頁使用，其他頁面不受影響
@@ -3286,7 +3575,7 @@ class ExcelProcessorApp(tk.Tk):
         "HomeTitle.TLabel", font=(self.base_family, 34, "bold")
     )
     style.configure(
-        "HomeSub.TLabel", font=(self.base_family, 16), foreground="#666666"
+        "HomeSub.TLabel", font=(self.base_family, 16), foreground=PAL["muted"]
     )
     style.configure(
         "Home.Accent.TButton", font=(self.base_family, 18, "bold")
@@ -3295,11 +3584,50 @@ class ExcelProcessorApp(tk.Tk):
     # 給舊式 tk 元件 (Listbox / Canvas / Toplevel) 用的顏色，讓它們跟主題一致
     try:
       bg = style.lookup(".", "background")
-      self.theme_bg = bg if bg else "#fafafa"
+      self.theme_bg = bg if bg else ("#1c1c1c" if PAL["dark"] else "#fafafa")
     except tk.TclError:
-      self.theme_bg = "#fafafa"
-    self.theme_fg = "#1c1c1c"
-    self.theme_select_bg = "#0067c0"
+      self.theme_bg = "#1c1c1c" if PAL["dark"] else "#fafafa"
+    self.theme_fg = PAL["fg"]
+    self.theme_select_bg = PAL["sel_bg"]
+    try:
+      self.configure(bg=self.theme_bg)
+    except tk.TclError:
+      pass
+
+  def apply_ui_scale(self, value):
+    """改變介面大小倍率：重設 tk 縮放（字體與元件一起變），並回到主頁重建畫面。"""
+    old = self.scale
+    self.ui_scale = value
+    self.tk.call("tk", "scaling", self.base_tk_scaling * value)
+    self.scale = max(0.6, self.winfo_fpixels("1i") / 96.0)
+    r = self.scale / old if old else 1.0
+    try:
+      w = max(self.px(820), int(self.winfo_width() * r))
+      h = max(self.px(650), int(self.winfo_height() * r))
+      self.minsize(self.px(820), self.px(650))
+      self.geometry(f"{w}x{h}")
+    except tk.TclError:
+      pass
+    self.setup_styles()
+    save_ui_scale(value)
+    self.show_main_home()
+
+  def toggle_theme(self):
+    """切換 淺色／科技深色，並重新顯示主頁（其他頁面進入時會用新主題重建）。"""
+    new = "light" if self.theme_name == "tech" else "tech"
+    if new == "tech" and not HAS_SV_TTK:
+      messagebox.showinfo(
+          "提示",
+          "科技深色主題需要 sv-ttk。\n請先在命令列執行：pip install sv-ttk\n安裝後重新開啟程式即可。",
+      )
+      return
+    self.theme_name = new
+    set_palette(new)
+    if HAS_SV_TTK:
+      sv_ttk.set_theme("dark" if new == "tech" else "light")
+    self.setup_styles()
+    save_theme_setting(new)
+    self.show_main_home()
 
   def center_dialog(self, top, w, h):
     w, h = self.px(w), self.px(h)
@@ -3360,6 +3688,31 @@ class ExcelProcessorApp(tk.Tk):
         command=self.show_view_mode,
     )
     btn_view.pack(pady=14, ipady=self.px(18))
+
+    opt = ttk.Frame(center)
+    opt.pack(pady=(20, 0))
+    ttk.Button(
+        opt,
+        text="🌓 切換主題（目前：" + ("科技深色" if self.theme_name == "tech" else "淺色") + "）",
+        command=self.toggle_theme,
+    ).pack(side="left", padx=(0, 16))
+    ttk.Label(opt, text="介面大小").pack(side="left", padx=(0, 6))
+    cmb_scale = ttk.Combobox(
+        opt, state="readonly", width=6,
+        values=[f"{int(round(c * 100))}%" for c in UI_SCALE_CHOICES],
+    )
+    cur = min(UI_SCALE_CHOICES, key=lambda c: abs(c - self.ui_scale))
+    cmb_scale.set(f"{int(round(cur * 100))}%")
+    cmb_scale.pack(side="left")
+    cmb_scale.bind(
+        "<<ComboboxSelected>>",
+        lambda e: self.apply_ui_scale(UI_SCALE_CHOICES[cmb_scale.current()]),
+    )
+    ttk.Label(
+        center,
+        text="介面大小是在 Windows 顯示縮放之外再加的倍率，會記住設定。",
+        style="Hint.TLabel",
+    ).pack(pady=(6, 0))
 
   # ==================== 共用：讀檔、取值範圍、檢視入口 ====================
   def load_infos(self, paths, parent=None, title="讀取 Excel 資料中…"):
@@ -4033,15 +4386,15 @@ class ExcelProcessorApp(tk.Tk):
         main_mgmt_frame,
         selectmode=tk.EXTENDED,
         font=self.font_list,
-        bg="#ffffff",
+        bg=PAL["card"],
         fg=self.theme_fg,
         selectbackground=self.theme_select_bg,
-        selectforeground="#ffffff",
+        selectforeground=PAL["sel_fg"],
         activestyle="none",
         relief="flat",
         borderwidth=0,
         highlightthickness=1,
-        highlightbackground="#d0d0d0",
+        highlightbackground=PAL["card_border"],
         highlightcolor=self.theme_select_bg,
     )
     self.listbox_items.pack(side="left", fill="both", expand=True)

@@ -27,7 +27,7 @@ class ExcelProcessorApp(SharedServices, tk.Tk):
 
   def __init__(self):
     super().__init__()
-    self.title("Excel 資料處理與列印整合工具")
+    self.title("科展資料處理")
 
     # 【UI 美化】依螢幕縮放比例調整視窗大小
     # base_tk_scaling＝Windows 顯示縮放換算出來的原始值；ui_scale＝程式內「介面大小」倍率
@@ -213,7 +213,7 @@ class ExcelProcessorApp(SharedServices, tk.Tk):
     center.place(relx=0.5, rely=0.42, anchor="center")
 
     lbl_title = ttk.Label(
-        center, text="Excel 資料處理系統", style="HomeTitle.TLabel"
+        center, text="科展資料處理", style="HomeTitle.TLabel"
     )
     lbl_title.pack(pady=(0, 10))
 
@@ -266,6 +266,12 @@ class ExcelProcessorApp(SharedServices, tk.Tk):
         text="介面大小是在 Windows 顯示縮放之外再加的倍率，會記住設定。",
         style="Hint.TLabel",
     ).pack(pady=(6, 0))
+
+    # 右下角的淡淡署名
+    ttk.Label(
+        self.container, text="By 洪旭辰", foreground=PAL["faint"],
+        font=(self.base_family, 11),
+    ).place(relx=1.0, rely=1.0, x=-6, y=-4, anchor="se")
 
 
 if __name__ == "__main__":
