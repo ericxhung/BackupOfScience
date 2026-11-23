@@ -36,6 +36,9 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg, NavigationToolb
 from modes.base import Mode
 
 _CanvasBase = tk.Canvas
+# 中文字體（matplotlib 圖表的中文才不會變成方框）；依序找系統上有的
+CJK_FONTS = ["Microsoft JhengHei", "Microsoft JhengHei UI", "PingFang TC", "Noto Sans CJK TC", "Heiti TC",
+             "Arial Unicode MS", "DejaVu Sans"]
 
 RS = getattr(Image, "Resampling", Image)
 
@@ -1176,6 +1179,7 @@ class SpectrumMode(Mode):
         self._hooked = False
         self._save_id = None
         self._rc_old = None
+        self._rc_fonts = None
 
         # ---- 狀態（離開模式再回來還會在）----
         self.photos = []                 # [{name, path, img}]，第 0 張是氖燈
@@ -1193,6 +1197,7 @@ class SpectrumMode(Mode):
         self.calib = None
         self.ref_img = None
         self.ref_map = None
+        self.ref_points = []                                  # 校準時點的 (x, y, 波長)
         self.refs_cache = self._parse_refs(DEFAULT_REFS)
         self._timers = {}
         self._scales = []
@@ -1242,15 +1247,20 @@ class SpectrumMode(Mode):
         self.page.pack(fill="both", expand=True)
         self.page.bind("<Destroy>", self._on_page_destroy, add="+")
         self._init_fonts()
-        try:                                  # matplotlib 字體依主程式的「介面大小」放大；離開時還原
+        try:                                  # matplotlib：中文字體、字體大小依主程式的「介面大小」；離開時還原
             self._rc_old = float(matplotlib.rcParams["font.size"])
+            self._rc_fonts = (list(matplotlib.rcParams["font.sans-serif"]), matplotlib.rcParams["axes.unicode_minus"])
             matplotlib.rcParams["font.size"] = self._rc_old * float(getattr(app, "ui_scale", 1.0))
+            matplotlib.rcParams["font.sans-serif"] = CJK_FONTS + [f for f in self._rc_fonts[0] if f not in CJK_FONTS]
+            matplotlib.rcParams["axes.unicode_minus"] = False
         except Exception:
             self._rc_old = None
+            self._rc_fonts = None
         ttk.Label(self.page, textvariable=self.status, anchor="w", relief="sunken").pack(side="bottom", fill="x")
         ub = ttk.Frame(self.page)
         ub.pack(side="top", fill="x")
         ttk.Button(ub, text="返回主選單", command=self.go_home).pack(side="left", padx=6, pady=2)
+        ttk.Button(ub, text="匯出全部設定 (JSON)", command=self.export_all_settings).pack(side="left", padx=6, pady=2)
         ttk.Label(ub, text="（介面大小、主題請在主選單調整）", style="Hint.TLabel").pack(side="left", padx=8)
         self.nb = ttk.Notebook(self.page)
         self.nb.pack(fill="both", expand=True)
@@ -1284,6 +1294,8 @@ class SpectrumMode(Mode):
         try:
             if self._rc_old is not None:
                 matplotlib.rcParams["font.size"] = self._rc_old
+            if self._rc_fonts is not None:
+                matplotlib.rcParams["font.sans-serif"], matplotlib.rcParams["axes.unicode_minus"] = self._rc_fonts
             self.save_settings_now()
         except Exception:
             pass
@@ -1365,7 +1377,8 @@ class SpectrumMode(Mode):
                 pass
         ref = {"path": self.ref_path,
                "map": [float(v) for v in self.ref_map] if self.ref_map else None,
-               "size": [int(self.ref_img.shape[1]), int(self.ref_img.shape[0])] if self.ref_img is not None else None}
+               "size": [int(self.ref_img.shape[1]), int(self.ref_img.shape[0])] if self.ref_img is not None else None,
+               "points": [[float(v) for v in q] for q in self.ref_points]}
         return {"version": 2, "reference": ref, "params": params, "dirs": self.dirs}
 
     def save_settings_now(self):
@@ -1396,6 +1409,10 @@ class SpectrumMode(Mode):
                 self.ref_map = tuple(float(v) for v in m)
             except Exception:
                 self.ref_map = None
+            try:
+                self.ref_points = [tuple(float(v) for v in q) for q in (r.get("points") or []) if len(q) == 3]
+            except Exception:
+                self.ref_points = []
         self.update_base_peaks()
         self.align.dirty = True
         self.align.schedule()
@@ -1965,6 +1982,7 @@ class SpectrumMode(Mode):
             messagebox.showerror("開啟失敗", str(e))
             return
         self.ref_map = None
+        self.ref_points = []
         self.ref_path = p
         self._rem("ref", p)
         self.base_pk_lam = np.array([])
@@ -1972,53 +1990,107 @@ class SpectrumMode(Mode):
         self.calibrate_reference()
 
     def calibrate_reference(self):
+        """校準底圖橫軸：在圖上點很多個「已知波長」的位置（至少 2 個），用最小平方法擬合一條直線。
+        點越多、分佈越廣，越準；放大後再點更準。"""
         if self.ref_img is None:
             self.load_reference()
             return
         top = tk.Toplevel(self.root)
         top.title("校準參考圖橫軸")
-        top.geometry("1250x650")
-        ttk.Label(top, text="請在圖上點兩個「已知波長」的位置（兩點離越遠越準）。滾輪可放大、右鍵拖曳平移，"
-                            "放大後再點最準；每點一下會問你波長。").pack(anchor="w", padx=6, pady=4)
+        top.geometry(f"{int(1250 * self.k)}x{int(700 * self.k)}")
+        ttk.Label(top, text="在圖上點「已知波長」的亮線位置（至少 2 個，建議 4 個以上、分散在左右兩端和中間）。"
+                            "滾輪放大、右鍵拖曳平移，放大後再點最準；每點一下會問你波長。點錯可按「復原上一點」。"
+                            ).pack(anchor="w", padx=6, pady=4)
+        bar = ttk.Frame(top)
+        bar.pack(side="bottom", fill="x", padx=6, pady=4)
+        info = tk.StringVar(master=self.root, value="")
+        ttk.Label(top, textvariable=info, anchor="w", justify="left").pack(side="bottom", fill="x", padx=8)
         zv = ZoomView(top)
         zv.pack(fill="both", expand=True)
         zv.set_image(self.ref_img, 1.0, bright=False, fit=True)
-        pts = []
+        pts = [tuple(q) for q in self.ref_points]            # (取樣座標 x, y, 波長)，上次點的會保留，可繼續加
+
+        def fit():
+            """回傳 (斜率, 截距, 殘差陣列)；點不夠或條件不合回傳 None。x 用像素邊界座標（取樣座標 + 0.5）"""
+            if len(pts) < 2:
+                return None
+            xs = np.array([q[0] + 0.5 for q in pts], float)
+            ls = np.array([q[2] for q in pts], float)
+            if xs.max() - xs.min() < 5:
+                return None
+            c = np.polyfit(xs, ls, 1)
+            return float(c[0]), float(c[1]), ls - (c[0] * xs + c[1])
+
+        def refresh():
+            zv.redraw_overlay()
+            r = fit()
+            lines = [f"已點 {len(pts)} 個點。"]
+            if len(pts) < 2:
+                lines.append("還需要至少 2 個點。")
+            elif r is None:
+                lines.append("點的位置太近（至少相距 5 px），請再點遠一點的線。")
+            else:
+                sl, ic, res = r
+                lines.append(f"擬合：每像素 {sl:.4f} nm；" + (f"殘差 RMS {float(np.sqrt(np.mean(res ** 2))):.3f} nm（越小越好，"
+                             "某點殘差特別大多半是點錯或波長輸入錯）" if len(pts) >= 3 else "只有 2 點時沒有殘差可看，建議再多點幾個"))
+                if sl <= 0:
+                    lines.append("⚠ 波長方向是反的（右邊波長比左邊小），目前不支援。")
+                lines.append("　".join(f"#{n + 1}: {q[2]:g}nm({e:+.2f})" for n, (q, e) in enumerate(zip(pts, res))))
+            info.set("\n".join(lines))
 
         def ov(v):
-            for x, y, lam in pts:
+            r = fit()
+            res = r[2] if r is not None else [None] * len(pts)
+            for n, ((x, y, lam), e) in enumerate(zip(pts, res)):
                 sx, sy = v.to_screen(x, y)
                 v.create_line(sx - 12, sy, sx + 12, sy, fill="#ff3b3b", width=2, tags="ov")
                 v.create_line(sx, sy - 12, sx, sy + 12, fill="#ff3b3b", width=2, tags="ov")
-                v.create_text(sx + 8, sy - 14, text=f"{lam:g} nm", fill="#ffe082", anchor="w", tags="ov")
+                tag = f"#{n + 1} {lam:g} nm" + ("" if e is None else f" ({e:+.2f})")
+                v.create_text(sx + 8, sy - 14, text=tag, fill="#ffe082", anchor="w", tags="ov")
 
         def onclick(ix, iy):
             lam = simpledialog.askfloat("波長", f"第 {len(pts) + 1} 個點是幾 nm？", parent=top)
             if lam is None:
                 return
             pts.append((ix, iy, lam))
-            zv.redraw_overlay()
-            if len(pts) == 2:
-                (xa, _, la), (xb, _, lb) = sorted(pts, key=lambda q: q[0])
-                xa, xb = xa + 0.5, xb + 0.5      # 取樣座標 -> 像素邊界座標
-                if abs(xb - xa) < 5 or la == lb:
-                    messagebox.showwarning("校準", "兩點太近或波長相同，請重新點。", parent=top)
-                    pts.clear()
-                    zv.redraw_overlay()
-                    return
-                if lb < la:
-                    messagebox.showwarning("校準", "右邊的點波長比左邊小，這張圖的波長方向反了，目前不支援。", parent=top)
-                    pts.clear()
-                    zv.redraw_overlay()
-                    return
-                self.ref_map = (xa, la, xb, lb)
-                top.destroy()
-                self.align.dirty = True
-                self.draw_align()
-                self.save_settings_now()          # 底圖路徑與橫軸校準立刻存進 SpectrumSetting.json
+            refresh()
 
+        def undo():
+            if pts:
+                pts.pop()
+                refresh()
+
+        def clear():
+            pts.clear()
+            refresh()
+
+        def done():
+            r = fit()
+            if r is None:
+                messagebox.showwarning("校準", "請至少點 2 個位置不同（相距 5 px 以上）的已知波長。", parent=top)
+                return
+            sl, ic, res = r
+            if sl <= 0:
+                messagebox.showwarning("校準", "右邊的點波長比左邊小，這張圖的波長方向反了，目前不支援。請檢查波長是否輸入錯，或按「清除全部」重點。", parent=top)
+                return
+            xs = [q[0] + 0.5 for q in pts]
+            xa, xb = min(xs), max(xs)
+            self.ref_map = (xa, sl * xa + ic, xb, sl * xb + ic)      # 用擬合直線的兩端表示（ref_lam 仍是兩點式）
+            self.ref_points = [tuple(float(v) for v in q) for q in pts]
+            top.destroy()
+            self.align.dirty = True
+            self.draw_align()
+            rms = float(np.sqrt(np.mean(res ** 2))) if len(pts) >= 3 else float("nan")
+            self.status.set(f"底圖橫軸已校準：{len(pts)} 個點" + (f"，擬合 RMS {rms:.3f} nm。" if len(pts) >= 3 else "（建議多點幾個以確認精準度）。"))
+            self.save_settings_now()          # 底圖路徑與橫軸校準立刻存進 SpectrumSetting.json
+
+        ttk.Button(bar, text="完成校準", command=done).pack(side="left", padx=4)
+        ttk.Button(bar, text="復原上一點", command=undo).pack(side="left", padx=4)
+        ttk.Button(bar, text="清除全部", command=clear).pack(side="left", padx=4)
+        ttk.Button(bar, text="取消", command=top.destroy).pack(side="left", padx=4)
         zv.draw_overlay = ov
         zv.click_cb = onclick
+        refresh()
 
     def ref_lam(self, px):
         x1, l1, x2, l2 = self.ref_map
@@ -2260,6 +2332,55 @@ class SpectrumMode(Mode):
             for i in range(len(x)):
                 w.writerow([f"{lam[i]:.4f}", int(x[i])] + [f"{pr[i]:.5f}" for _, pr in out])
         self.status.set(f"已存：{p}")
+
+    def export_all_settings(self):
+        """把目前所有設定一次匯出成 JSON：參數、裁切線、照片清單、底圖與橫軸校準（含點）、
+        參考波長、偵測到的峰與配對、校正結果。（照片本身不會放進去，只記路徑）"""
+        import datetime
+        allv = list(PARAM_VARS) + ["var_width", "var_shear", "var_gain", "var_center", "var_span"]
+        params = {}
+        for name in dict.fromkeys(allv):
+            try:
+                params[name] = getattr(self, name).get()
+            except Exception:
+                pass
+        line = None
+        if self.p0 is not None and self.p1 is not None:
+            line = {"p0": [float(v) for v in self.p0], "p1": [float(v) for v in self.p1],
+                    "width_px": self.cur_width(), "shear_deg": fget(self.var_shear)}
+        n = len(self.pk_x)
+        refs_hit = list(self.pk_ref) + [None] * (n - len(self.pk_ref))
+        peaks = [{"x_px": float(self.pk_x[i]), "height": float(self.pk_h[i]),
+                  "matched_nm": None if refs_hit[i] is None else float(refs_hit[i])} for i in range(n)]
+        data = {
+            "tool": "spectrum_mode", "format_version": 1,
+            "exported_at": datetime.datetime.now().isoformat(timespec="seconds"),
+            "parameters": params,
+            "line": line,
+            "photos": [{"name": ph["name"], "path": ph["path"], "display_gain": ph.get("gain")} for ph in self.photos],
+            "viewing_photo_index": self.view_idx,
+            "reference": {"path": self.ref_path,
+                          "size": [int(self.ref_img.shape[1]), int(self.ref_img.shape[0])] if self.ref_img is not None else None,
+                          "axis_map_x1_l1_x2_l2": [float(v) for v in self.ref_map] if self.ref_map else None,
+                          "calibration_points_x_y_nm": [[float(v) for v in q] for q in self.ref_points],
+                          "detected_base_peaks_nm": [float(v) for v in self.base_pk_lam]},
+            "reference_nm": [float(v) for v in self.refs_cache],
+            "peaks": peaks,
+            "calibration": self.calib,
+            "folders": self.dirs,
+        }
+        p = filedialog.asksaveasfilename(title="匯出全部設定", defaultextension=".json", filetypes=[("JSON", "*.json")],
+                                         initialdir=self._d("out"), initialfile="spectrum_all_settings.json", parent=self.app)
+        self._rem("out", p)
+        if not p:
+            return
+        try:
+            with open(p, "w", encoding="utf-8") as fh:
+                json.dump(data, fh, ensure_ascii=False, indent=2, default=lambda o: o.item() if hasattr(o, "item") else str(o))
+        except Exception as e:
+            messagebox.showerror("匯出失敗", str(e), parent=self.app)
+            return
+        self.status.set(f"已匯出全部設定：{p}")
 
     def save_json(self):
         if not self._need_calib():
