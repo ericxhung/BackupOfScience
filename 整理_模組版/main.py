@@ -1,13 +1,12 @@
 """主程式：視窗外殼、主題、介面大小、主頁。各功能在 modes 資料夾，執行這個檔案即可啟動。"""
 
+import os
+import sys
 import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import messagebox, ttk
 
-from core import InfoCache, PAL, UI_SCALE_CHOICES, enable_high_dpi, load_range_settings, load_theme_setting, load_ui_scale, save_theme_setting, save_ui_scale, set_palette
-from charts import PAL
-from dialogs import PAL
-from ai_chat import PAL
+from core import app_dir, InfoCache, PAL, UI_SCALE_CHOICES, enable_high_dpi, load_range_settings, load_theme_setting, load_ui_scale, save_theme_setting, save_ui_scale, set_palette
 from services import SharedServices
 from modes import LOAD_ERRORS, MODE_CLASSES
 
@@ -64,6 +63,33 @@ class ExcelProcessorApp(SharedServices, tk.Tk):
 
     # 進入點：顯示系統主頁
     self.show_main_home()
+
+  def report_callback_exception(self, exc, val, tb):
+    """視窗事件裡發生未處理的錯誤時：寫進 error_log.txt。
+    打包成 exe 後沒有黑色命令列視窗，錯誤才不會「靜靜消失」。"""
+    import time
+    import traceback
+
+    text = "".join(traceback.format_exception(exc, val, tb))
+    try:
+      with open(os.path.join(app_dir(), "error_log.txt"), "a", encoding="utf-8") as f:
+        f.write(time.strftime("[%Y-%m-%d %H:%M:%S]\n") + text + "\n")
+    except OSError:
+      pass
+    traceback.print_exception(exc, val, tb)  # 一般執行時，命令列照常顯示
+    # 只有打包版才跳視窗；而且 5 秒內最多跳一次，避免重複錯誤洗版
+    if getattr(sys, "frozen", False):
+      now = time.time()
+      if now - getattr(self, "_last_err_popup", 0) > 5:
+        self._last_err_popup = now
+        try:
+          messagebox.showerror(
+              "發生錯誤",
+              f"{exc.__name__}: {val}\n\n詳細內容已記錄在 error_log.txt",
+              parent=self,
+          )
+        except Exception:
+          pass
 
   def setup_theme(self):
     if HAS_SV_TTK:

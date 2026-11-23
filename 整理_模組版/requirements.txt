@@ -1,0 +1,8 @@
+# 執行程式需要的套件（打包前，請先在這台電腦安裝好）
+pandas
+openpyxl
+matplotlib
+plotly
+sv-ttk
+# 只有「打包成 exe」才需要
+pyinstaller>=6.21

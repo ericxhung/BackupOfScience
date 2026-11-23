@@ -4,7 +4,6 @@ import json
 import os
 import re
 import tkinter as tk
-import pandas as pd
 import calendar
 import statistics
 import tempfile
@@ -13,8 +12,9 @@ import webbrowser
 from datetime import datetime
 from tkinter import filedialog, messagebox, ttk
 
-from core import EXCEL_EXTS, PAL, _disp_width, build_points, coord_to_index, get_values, listbox_colors, load_item_mapping, median_reading, natural_key, range_key
-from charts import Figure, FigureCanvasTkAgg, HAS_MPL, HAS_MPL_TK, HAS_PLOTLY, LAYOUT_KEYS, LAYOUT_LABELS, NavigationToolbar2Tk, PAL, build_plotly_html, draw_chart, natural_key, setup_mpl_fonts
+from core import app_dir, pd, EXCEL_EXTS, PAL, _disp_width, build_points, coord_to_index, get_values, listbox_colors, load_item_mapping, median_reading, natural_key, range_key
+import charts
+from charts import HAS_PLOTLY, LAYOUT_KEYS, LAYOUT_LABELS, PAL, build_plotly_html, draw_chart, natural_key, setup_mpl_fonts
 from dialogs import CheckList, PAL, get_values, open_file, range_key
 from ai_chat import AIMixin, CheckList, PAL, _disp_width
 from modes.base import Mode
@@ -47,7 +47,7 @@ Y_LABELS = {
 
 def load_view_setting():
   try:
-    with open(os.path.join(os.getcwd(), VIEW_FILE), "r", encoding="utf-8") as f:
+    with open(os.path.join(app_dir(), VIEW_FILE), "r", encoding="utf-8") as f:
       data = json.load(f)
     if isinstance(data, dict):
       return data
@@ -58,7 +58,7 @@ def load_view_setting():
 
 def save_view_setting(data):
   try:
-    with open(os.path.join(os.getcwd(), VIEW_FILE), "w", encoding="utf-8") as f:
+    with open(os.path.join(app_dir(), VIEW_FILE), "w", encoding="utf-8") as f:
       json.dump(data, f, ensure_ascii=False, indent=2)
   except Exception:
     pass
@@ -731,11 +731,11 @@ class ViewPage(AIMixin):
     self.lbl_chart.pack(side="bottom", anchor="w", pady=(4, 0))
     self.fig = None
     self.canvas = None
-    if HAS_MPL and HAS_MPL_TK:
+    if charts.ensure_mpl() and charts.HAS_MPL_TK:
       setup_mpl_fonts()
-      self.fig = Figure(figsize=(7, 5), dpi=100, facecolor=PAL["plot_bg"])
-      self.canvas = FigureCanvasTkAgg(self.fig, master=right)
-      toolbar = NavigationToolbar2Tk(self.canvas, right, pack_toolbar=False)
+      self.fig = charts.Figure(figsize=(7, 5), dpi=100, facecolor=PAL["plot_bg"])
+      self.canvas = charts.FigureCanvasTkAgg(self.fig, master=right)
+      toolbar = charts.NavigationToolbar2Tk(self.canvas, right, pack_toolbar=False)
       toolbar.update()
       toolbar.pack(side="bottom", fill="x")
       self.canvas.get_tk_widget().pack(side="top", fill="both", expand=True)

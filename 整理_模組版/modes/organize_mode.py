@@ -4,14 +4,11 @@ import json
 import os
 import tkinter as tk
 import openpyxl
-import pandas as pd
 from datetime import datetime
 from tkinter import filedialog, messagebox, ttk
 
-from core import PAL, get_values, range_key
-from charts import PAL
+from core import app_dir, pd, PAL, get_values, range_key
 from dialogs import PAL, get_values, range_key
-from ai_chat import PAL
 from modes.base import Mode
 
 
@@ -229,7 +226,7 @@ class OrganizeMode(Mode):
             "讀取警告", f"無法讀取檔案 {f['filename']}：\n{e}"
         )
 
-    setting_file_path = os.path.join(os.getcwd(), "setting.json")
+    setting_file_path = os.path.join(app_dir(), "setting.json")
     loaded_from_setting = False
 
     if os.path.exists(setting_file_path):
@@ -523,7 +520,7 @@ class OrganizeMode(Mode):
 
   def process_and_export(self):
     try:
-      setting_file_path = os.path.join(os.getcwd(), "setting.json")
+      setting_file_path = os.path.join(app_dir(), "setting.json")
       try:
         with open(setting_file_path, "w", encoding="utf-8") as sf:
           json.dump(self.item_mapping, sf, ensure_ascii=False, indent=4)

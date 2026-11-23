@@ -15,7 +15,7 @@ import urllib.request
 from datetime import datetime
 from tkinter import messagebox, ttk
 
-from core import PAL, _disp_width
+from core import PAL, _disp_width, app_dir
 from dialogs import CheckList, ProgressWindow
 
 
@@ -30,7 +30,7 @@ AI_SYSTEM = (
 
 def load_gemini_setting():
   try:
-    with open(GEMINI_SETTING_FILE, "r", encoding="utf-8") as f:
+    with open(os.path.join(app_dir(), GEMINI_SETTING_FILE), "r", encoding="utf-8") as f:
       d = json.load(f)
     return d if isinstance(d, dict) else {}
   except (OSError, ValueError):
@@ -39,7 +39,7 @@ def load_gemini_setting():
 
 def save_gemini_setting(d):
   try:
-    with open(GEMINI_SETTING_FILE, "w", encoding="utf-8") as f:
+    with open(os.path.join(app_dir(), GEMINI_SETTING_FILE), "w", encoding="utf-8") as f:
       json.dump(d, f, ensure_ascii=False, indent=2)
     return True
   except OSError:

@@ -1,5 +1,6 @@
 """圖表繪製：matplotlib（視窗內）與 plotly（瀏覽器互動圖）。"""
 
+import importlib.util
 import os
 import re
 import math
@@ -9,37 +10,60 @@ from collections import OrderedDict, defaultdict
 from core import PAL, natural_key
 
 
-# 【檢視模式】互動圖表用 plotly（在瀏覽器開啟）；沒安裝就只能用視窗內的 matplotlib 圖。
-try:
-  import plotly.graph_objects as go
+# ---------- 大套件改成「用到才載入」，讓程式啟動更快 ----------
+# plotly、matplotlib 載入各要一兩秒，所以不在啟動時載入：
+#   HAS_PLOTLY：只檢查有沒有安裝（很快），真的畫圖時才會載入 plotly。
+#   ensure_mpl()：第一次需要 matplotlib（進入「檢視」模式）時才載入。
+HAS_PLOTLY = importlib.util.find_spec("plotly") is not None
 
-  HAS_PLOTLY = True
-except Exception:
-  go = None
-  HAS_PLOTLY = False
 
-# 【檢視模式】圖表用 matplotlib；沒安裝也能執行，只是圖表分頁會提示要安裝。
-try:
-  import matplotlib
-  import matplotlib.dates as mdates
-  from matplotlib import font_manager as mpl_font_manager
-  from matplotlib.figure import Figure
+class _LazyGo:
+  """第一次用到 go.Figure 之類的東西時，才載入 plotly。"""
 
-  HAS_MPL = True
-except Exception:
-  matplotlib = mdates = mpl_font_manager = Figure = None
-  HAS_MPL = False
+  def __getattr__(self, name):
+    import plotly.graph_objects as _go
 
-try:
-  from matplotlib.backends.backend_tkagg import (
-      FigureCanvasTkAgg,
-      NavigationToolbar2Tk,
-  )
+    return getattr(_go, name)
 
-  HAS_MPL_TK = True
-except Exception:
-  FigureCanvasTkAgg = NavigationToolbar2Tk = None
-  HAS_MPL_TK = False
+
+go = _LazyGo()
+
+matplotlib = mdates = mpl_font_manager = Figure = None
+FigureCanvasTkAgg = NavigationToolbar2Tk = None
+HAS_MPL = importlib.util.find_spec("matplotlib") is not None
+HAS_MPL_TK = HAS_MPL  # 載入之後會更新成實際結果
+_mpl_loaded = False
+
+
+def ensure_mpl():
+  """載入 matplotlib（只會做一次）。成功回傳 True，沒安裝回傳 False。"""
+  global matplotlib, mdates, mpl_font_manager, Figure
+  global FigureCanvasTkAgg, NavigationToolbar2Tk, HAS_MPL, HAS_MPL_TK, _mpl_loaded
+  if _mpl_loaded:
+    return HAS_MPL
+  _mpl_loaded = True
+  try:
+    import matplotlib as _m
+    import matplotlib.dates as _d
+    from matplotlib import font_manager as _f
+    from matplotlib.figure import Figure as _Fig
+
+    matplotlib, mdates, mpl_font_manager, Figure = _m, _d, _f, _Fig
+    HAS_MPL = True
+  except Exception:
+    HAS_MPL = HAS_MPL_TK = False
+    return False
+  try:
+    from matplotlib.backends.backend_tkagg import (
+        FigureCanvasTkAgg as _Canvas,
+        NavigationToolbar2Tk as _Toolbar,
+    )
+
+    FigureCanvasTkAgg, NavigationToolbar2Tk = _Canvas, _Toolbar
+    HAS_MPL_TK = True
+  except Exception:
+    HAS_MPL_TK = False
+  return True
 
 
 # ---------- 圖表 ----------
@@ -54,7 +78,7 @@ CHART_MARKERS = ["o", "s", "^", "D", "v", "P", "X", "*"]
 
 def setup_mpl_fonts():
   """matplotlib 預設字型沒有中文，會變成方塊字，所以挑系統上有的中文字型。"""
-  if not HAS_MPL:
+  if not ensure_mpl():
     return
   try:
     names = {f.name for f in mpl_font_manager.fontManager.ttflist}

@@ -7,19 +7,25 @@
 
 import importlib
 import pkgutil
+import sys
 
 from modes.base import Mode
 
 MODE_CLASSES = []
 LOAD_ERRORS = []  # [(檔名, 錯誤訊息)]
 
-for _info in sorted(pkgutil.iter_modules(__path__), key=lambda m: m.name):
-  if _info.name.startswith("_") or _info.name == "base":
+_names = {m.name for m in pkgutil.iter_modules(__path__)}
+if getattr(sys, "frozen", False):
+  # 打包成 exe 之後，保底把內建的三個模式也列進去（打包時已用 --collect-submodules modes 收進來）
+  _names |= {"print_mode", "organize_mode", "view_mode"}
+
+for _name in sorted(_names):
+  if _name.startswith("_") or _name == "base":
     continue
   try:
-    _mod = importlib.import_module(f"modes.{_info.name}")
+    _mod = importlib.import_module(f"modes.{_name}")
   except Exception as _e:
-    LOAD_ERRORS.append((_info.name, f"{type(_e).__name__}: {_e}"))
+    LOAD_ERRORS.append((_name, f"{type(_e).__name__}: {_e}"))
     continue
   for _obj in vars(_mod).values():
     if (

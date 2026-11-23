@@ -28,6 +28,28 @@ def enable_high_dpi():
         pass
 
 
+class _LazyPandas:
+  """第一次用到 pd.xxx 時才載入 pandas（載入要一兩秒，不要拖慢啟動）。"""
+
+  def __getattr__(self, name):
+    import pandas as _pd
+
+    return getattr(_pd, name)
+
+
+pd = _LazyPandas()
+
+
+def app_dir():
+  """設定檔、快取檔的存放資料夾。
+  - 打包成 exe 時：exe 所在的資料夾（不管從哪裡開啟捷徑都一樣）。
+  - 一般用 python 執行時：目前工作資料夾（和以前的行為相同）。
+  """
+  if getattr(sys, "frozen", False):
+    return os.path.dirname(os.path.abspath(sys.executable))
+  return os.getcwd()
+
+
 # ==================== 共用取值層（列印／整理／檢視 三個模式共用）====================
 # 做法：不再靠「第一個符合的格子」去猜，而是看公式的意思：
 #   - 找到 =AVERAGE(某欄範圍) → 看它平均的是 A0 欄還是 R(電阻) 欄
@@ -431,7 +453,7 @@ class InfoCache:
   """記住每個檔案讀過的結果（檔案沒變就不重讀），存成 view_cache.pkl。"""
 
   def __init__(self, filename="view_cache.pkl"):
-    self.file = os.path.join(os.getcwd(), filename)
+    self.file = os.path.join(app_dir(), filename)
     self.data = {}
     self.loaded = False
     self.dirty = False
@@ -510,7 +532,7 @@ def range_key(path, sheet_name):
 
 def load_range_settings():
   try:
-    with open(os.path.join(os.getcwd(), RANGE_FILE), "r", encoding="utf-8") as f:
+    with open(os.path.join(app_dir(), RANGE_FILE), "r", encoding="utf-8") as f:
       data = json.load(f)
     out = {}
     if isinstance(data, dict):
@@ -529,7 +551,7 @@ def load_range_settings():
 
 def save_range_settings(settings):
   try:
-    with open(os.path.join(os.getcwd(), RANGE_FILE), "w", encoding="utf-8") as f:
+    with open(os.path.join(app_dir(), RANGE_FILE), "w", encoding="utf-8") as f:
       json.dump(settings, f, ensure_ascii=False, indent=2)
     return True
   except Exception:
@@ -648,7 +670,7 @@ def sheet_has_values(sheet):
 def load_item_mapping():
   """回傳 ({原工作表名: 代表名稱}, [代表名稱的順序])；沒有設定檔就回傳空的。"""
   try:
-    with open(os.path.join(os.getcwd(), "setting.json"), "r", encoding="utf-8") as f:
+    with open(os.path.join(app_dir(), "setting.json"), "r", encoding="utf-8") as f:
       data = json.load(f)
   except Exception:
     return {}, []
@@ -760,7 +782,7 @@ UI_SCALE_CHOICES = (0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0)
 
 def _load_prefs():
   try:
-    with open(os.path.join(os.getcwd(), THEME_FILE), "r", encoding="utf-8") as f:
+    with open(os.path.join(app_dir(), THEME_FILE), "r", encoding="utf-8") as f:
       d = json.load(f)
     return d if isinstance(d, dict) else {}
   except Exception:
@@ -771,7 +793,7 @@ def _save_prefs(**kw):
   d = _load_prefs()
   d.update(kw)
   try:
-    with open(os.path.join(os.getcwd(), THEME_FILE), "w", encoding="utf-8") as f:
+    with open(os.path.join(app_dir(), THEME_FILE), "w", encoding="utf-8") as f:
       json.dump(d, f, ensure_ascii=False)
   except Exception:
     pass
